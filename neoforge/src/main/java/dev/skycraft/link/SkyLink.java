@@ -7,7 +7,8 @@ import com.sun.jna.Native;
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
-import dev.skycraft.SkyCraft;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Java 21 version of SkyCraft's Windows shared-memory bridge.
@@ -17,6 +18,7 @@ import dev.skycraft.SkyCraft;
  * The binary protocol and offsets are unchanged.
  */
 public final class SkyLink {
+    private static final Logger LOG = LoggerFactory.getLogger("skycraft-link");
     private static final int FILE_MAP_ALL_ACCESS = 0xF001F;
     private static final long HEARTBEAT_TIMEOUT_MS = 8000L;
 
@@ -46,10 +48,10 @@ public final class SkyLink {
                 Pointer.NULL, 0, new WString(MAPPING_NAME + "_minecraft")
             });
             if (runningMutex == null) {
-                SkyCraft.LOG.warn("SkyCraft: couldn't create the running-Minecraft mutex (Windows error {})", Native.getLastError());
+                LOG.warn("SkyCraft: couldn't create the running-Minecraft mutex (Windows error {})", Native.getLastError());
             }
         } catch (Throwable t) {
-            SkyCraft.LOG.warn("SkyCraft: couldn't create the running-Minecraft mutex", t);
+            LOG.warn("SkyCraft: couldn't create the running-Minecraft mutex", t);
         }
     }
 
@@ -83,7 +85,7 @@ public final class SkyLink {
             if (pid != skyrimPid) {
                 skyrimPid = pid;
                 generation++;
-                SkyCraft.LOG.info("SkyCraft: Skyrim instance changed (pid {})", pid);
+                LOG.info("SkyCraft: Skyrim instance changed (pid {})", pid);
             }
             return;
         }
@@ -102,7 +104,7 @@ public final class SkyLink {
                 int error = Native.getLastError();
                 if (error != lastOpenError) {
                     lastOpenError = error;
-                    SkyCraft.LOG.info(
+                    LOG.info(
                         "SkyCraft: can't open Skyrim's shared memory yet (Windows error {}{})",
                         error,
                         error == 2 ? ": Skyrim hasn't created it yet"
@@ -117,14 +119,14 @@ public final class SkyLink {
                 handle, FILE_MAP_ALL_ACCESS, 0, 0, 0L
             });
             if (view == null) {
-                SkyCraft.LOG.error("SkyCraft: MapViewOfFile failed (Windows error {})", Native.getLastError());
+                LOG.error("SkyCraft: MapViewOfFile failed (Windows error {})", Native.getLastError());
                 return;
             }
 
             int magic = view.getInt(OFF_HEADER + H_MAGIC);
             int version = view.getInt(OFF_HEADER + H_VERSION);
             if (magic != MAGIC || version != VERSION) {
-                SkyCraft.LOG.error(
+                LOG.error(
                     "SkyCraft: protocol mismatch (magic {} version {}); expected magic {} version {}",
                     Integer.toHexString(magic), version, Integer.toHexString(MAGIC), VERSION
                 );
@@ -137,9 +139,9 @@ public final class SkyLink {
             generation++;
             shm = view;
             lastOpenError = -1;
-            SkyCraft.LOG.info("SkyCraft: linked to Skyrim (pid {})", skyrimPid);
+            LOG.info("SkyCraft: linked to Skyrim (pid {})", skyrimPid);
         } catch (Throwable t) {
-            SkyCraft.LOG.error("SkyCraft: failed to open Skyrim shared memory", t);
+            LOG.error("SkyCraft: failed to open Skyrim shared memory", t);
         }
     }
 
