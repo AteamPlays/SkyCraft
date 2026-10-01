@@ -2,6 +2,7 @@ package dev.skycraft.client;
 
 import dev.skycraft.SkyCraft;
 import dev.skycraft.link.SkyLink;
+import dev.skycraft.world.SkyrimCollisionMirror;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.phys.Vec3;
@@ -39,6 +40,7 @@ public final class SkyClient {
             linked = nowLinked;
             mirrorReadyLogged = false;
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
+            if (linked) SkyrimCollisionMirror.start();
         }
 
         if (!linked || !SkyLink.readSkyState(SKY)) {
@@ -47,6 +49,9 @@ public final class SkyClient {
 
         Minecraft minecraft = Minecraft.getInstance();
         MirrorWorld.tick(minecraft, SKY);
+        if (MirrorWorld.isReady(minecraft)) {
+            SkyrimCollisionMirror.flushToMirrorWorld(minecraft);
+        }
 
         LocalPlayer player = minecraft.player;
         MC.flags = 0; // Do not hand movement authority to Minecraft yet.
