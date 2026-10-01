@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 @Mod(value = SkyCraft.MOD_ID, dist = Dist.CLIENT)
 public final class SkyCraft {
     public static final String MOD_ID = "skycraft";
+    public static final String WORLD_NAME = "SkyCraft";
     public static final Logger LOG = LoggerFactory.getLogger(MOD_ID);
 
     public SkyCraft() {
