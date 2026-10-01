@@ -12,12 +12,6 @@ Play Skyrim with Minecraft physics, inventory and viewmodels.
 NeoForge 1.21.1 compatibility port.
 '''
 
-[[mixins]]
-config="skycraft.mixins.json"
-
-[[mixins]]
-config="skycraft.client.mixins.json"
-
 [[dependencies.skycraft]]
 modId="neoforge"
 type="required"
@@ -30,11 +24,4 @@ modId="minecraft"
 type="required"
 versionRange="[1.21.1]"
 ordering="NONE"
-side="CLIENT"
-
-[[dependencies.skycraft]]
-modId="forgified_fabric_api"
-type="required"
-versionRange="[0.116,)"
-ordering="AFTER"
 side="CLIENT"
