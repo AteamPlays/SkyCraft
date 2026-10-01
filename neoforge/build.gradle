@@ -22,12 +22,12 @@ repositories {
 sourceSets {
     main {
         java {
-            srcDir 'src/main/java'
+            // src/main/java is already included by the Java plugin.
             srcDir '../fabric/src/main/java'
             srcDir '../fabric/src/client/java'
         }
         resources {
-            srcDir 'src/main/resources'
+            // src/main/resources is already included by the Java plugin.
             srcDir '../fabric/src/main/resources'
             srcDir '../fabric/src/client/resources'
             exclude 'fabric.mod.json'
