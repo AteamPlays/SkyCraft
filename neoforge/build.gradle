@@ -53,6 +53,11 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed'
+        exceptionFormat 'full'
+        showStandardStreams = true
+    }
 }
 
 tasks.withType(JavaCompile).configureEach {
