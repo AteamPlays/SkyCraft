@@ -1,0 +1,82 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'net.neoforged.moddev' version '2.0.148'
+    id 'idea'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = 'skycraft-neoforge'
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+repositories {
+    maven { url = 'https://maven.sinytra.org' }
+    mavenCentral()
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir 'src/main/java'
+            srcDir '../fabric/src/main/java'
+            srcDir '../fabric/src/client/java'
+        }
+        resources {
+            srcDir 'src/main/resources'
+            srcDir '../fabric/src/main/resources'
+            srcDir '../fabric/src/client/resources'
+            exclude 'fabric.mod.json'
+        }
+    }
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = file('run')
+            programArguments.addAll '--username', (System.getenv('SKYCRAFT_USERNAME') ?: 'Dovahkiin')
+        }
+    }
+
+    mods {
+        skycraft {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+dependencies {
+    implementation "org.sinytra.forgified-fabric-api:forgified-fabric-api:${project.forgified_fabric_api_version}"
+}
+
+tasks.withType(ProcessResources).configureEach {
+    filesMatching(['skycraft.mixins.json', 'skycraft.client.mixins.json']) {
+        filter { line -> line.replace('"JAVA_25"', '"JAVA_21"') }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    manifest {
+        attributes(
+            'Implementation-Title': 'SkyCraft NeoForge',
+            'Implementation-Version': project.version
+        )
+    }
+}
