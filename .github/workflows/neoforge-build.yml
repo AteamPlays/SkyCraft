@@ -1,0 +1,26 @@
+name: NeoForge 1.21.1 port
+
+on:
+  push:
+    branches: [ "neoforge-1.21.1" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Build NeoForge port
+        shell: cmd
+        working-directory: neoforge
+        run: ..\fabric\gradlew.bat build --stacktrace
