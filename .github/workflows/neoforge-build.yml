@@ -5,6 +5,10 @@ on:
     branches: [ "neoforge-1.21.1" ]
   workflow_dispatch:
 
+concurrency:
+  group: neoforge-1.21.1-port
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
