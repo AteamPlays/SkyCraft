@@ -2,6 +2,7 @@ package dev.skycraft;
 
 import dev.skycraft.client.SkyClient;
 import dev.skycraft.link.SkyLink;
+import dev.skycraft.world.SkyCollision;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -18,6 +19,7 @@ public final class SkyCraft {
     public SkyCraft() {
         LOG.info("SkyCraft: NeoForge 1.21.1 core loaded");
         SkyLink.announceRunning();
+        SkyCollision.startConsumer();
         NeoForge.EVENT_BUS.addListener(SkyCraft::onClientTick);
     }
 

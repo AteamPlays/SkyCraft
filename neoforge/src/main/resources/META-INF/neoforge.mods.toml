@@ -25,3 +25,7 @@ type="required"
 versionRange="[1.21.1]"
 ordering="NONE"
 side="CLIENT"
+
+
+[[mixins]]
+config="skycraft-neoforge.mixins.json"
