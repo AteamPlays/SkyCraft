@@ -45,6 +45,14 @@ dependencies {
     // Minecraft 1.21.1 already uses JNA on Windows. Declare it explicitly so the
     // shared-memory bridge is available to the development compiler as well.
     implementation 'net.java.dev.jna:jna:5.14.0'
+
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
 }
 
 tasks.withType(JavaCompile).configureEach {
