@@ -15,24 +15,7 @@ base {
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
 repositories {
-    maven { url = 'https://maven.sinytra.org' }
     mavenCentral()
-}
-
-sourceSets {
-    main {
-        java {
-            // src/main/java is already included by the Java plugin.
-            srcDir '../fabric/src/main/java'
-            srcDir '../fabric/src/client/java'
-        }
-        resources {
-            // src/main/resources is already included by the Java plugin.
-            srcDir '../fabric/src/main/resources'
-            srcDir '../fabric/src/client/resources'
-            exclude 'fabric.mod.json'
-        }
-    }
 }
 
 neoForge {
@@ -59,13 +42,9 @@ neoForge {
 }
 
 dependencies {
-    implementation "org.sinytra.forgified-fabric-api:forgified-fabric-api:${project.forgified_fabric_api_version}"
-}
-
-tasks.withType(ProcessResources).configureEach {
-    filesMatching(['skycraft.mixins.json', 'skycraft.client.mixins.json']) {
-        filter { line -> line.replace('"JAVA_25"', '"JAVA_21"') }
-    }
+    // Minecraft 1.21.1 already uses JNA on Windows. Declare it explicitly so the
+    // shared-memory bridge is available to the development compiler as well.
+    implementation 'net.java.dev.jna:jna:5.14.0'
 }
 
 tasks.withType(JavaCompile).configureEach {
