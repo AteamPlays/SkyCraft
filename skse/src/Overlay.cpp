@@ -374,11 +374,20 @@ float4 PSMain(VSOut i) : SV_Target {
 			Link::Get().Heartbeat();
 			Game::CheckRenderedCamera();
 			try {
-				// Minecraft's world things (blocks, arrows, items) go under its hand and HUD.
+				bool framePassthrough = false;
 				if (Link::Get().Valid() && InitResources(a_swapChain)) {
-					WorldRender::Draw(device, context, a_swapChain);
+					// New path: what Minecraft actually rendered (including Create/Flywheel/Sable)
+					// is composited with Skyrim using both games' depth buffers.
+					framePassthrough = Passthrough::Draw(device, context, a_swapChain);
+					if (!framePassthrough) {
+						// Keep the original mesh path as a fallback until the framebuffer producer
+						// has published its first complete frame.
+						WorldRender::Draw(device, context, a_swapChain);
+					}
 				}
-				DrawOverlay(a_swapChain);
+				if (!framePassthrough) {
+					DrawOverlay(a_swapChain);
+				}
 				if (device) {
 					WorldRender::CaptureIfRequested(context, a_swapChain);
 				}
