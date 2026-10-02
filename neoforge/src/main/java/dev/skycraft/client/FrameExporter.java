@@ -150,7 +150,17 @@ public final class FrameExporter {
             target.unbindRead();
         }
 
+        // 1.21.1's main framebuffer can report the transparent clear as opaque black
+        // after the hand/GUI pass. Remove only near-black background pixels here so
+        // Skyrim remains visible under the hand/HUD. World colour/depth are separate,
+        // so this cannot erase actual Minecraft world geometry.
+        int cleared = repairOverlayAlpha(overlay, bytes);
         overlay.position(0);
+        if (!logged) {
+            SkyCraft.LOG.info("SkyCraft: overlay alpha repair cleared {} of {} pixels",
+                cleared, pendingW * pendingH);
+        }
+
         write.finish(
             overlay, pendingW, pendingH, NEAR, pendingFar, pendingFov,
             pendingCamX, pendingCamY, pendingCamZ, pendingYaw, pendingPitch
@@ -164,6 +174,20 @@ public final class FrameExporter {
                 pendingW, pendingH
             );
         }
+    }
+
+    private static int repairOverlayAlpha(ByteBuffer rgba, int bytes) {
+        int cleared = 0;
+        for (int i = 0; i < bytes; i += 4) {
+            int r = rgba.get(i) & 0xFF;
+            int g = rgba.get(i + 1) & 0xFF;
+            int b = rgba.get(i + 2) & 0xFF;
+            if (r <= 2 && g <= 2 && b <= 2) {
+                rgba.put(i + 3, (byte) 0);
+                cleared++;
+            }
+        }
+        return cleared;
     }
 
     private static void ensureCapacity(int bytes) {
