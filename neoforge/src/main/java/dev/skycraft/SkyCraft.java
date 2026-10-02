@@ -1,6 +1,5 @@
 package dev.skycraft;
 
-import dev.skycraft.client.FrameExporter;
 import dev.skycraft.client.SkyClient;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.world.SkyCollision;
@@ -9,7 +8,6 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
-import net.neoforged.neoforge.client.event.RenderFrameEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,14 +24,9 @@ public final class SkyCraft {
         SkyLink.announceRunning();
         SkyCollision.startConsumer();
         NeoForge.EVENT_BUS.addListener(SkyCraft::onClientTick);
-        NeoForge.EVENT_BUS.addListener(SkyCraft::onRenderFrame);
     }
 
     private static void onClientTick(ClientTickEvent.Post event) {
         SkyClient.clientTick();
-    }
-
-    private static void onRenderFrame(RenderFrameEvent.Post event) {
-        FrameExporter.captureOverlay(net.minecraft.client.Minecraft.getInstance());
     }
 }
