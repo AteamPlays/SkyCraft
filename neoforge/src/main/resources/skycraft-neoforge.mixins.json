@@ -4,7 +4,9 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "EntityCollideMixin",
-    "LevelRendererMixin"
+    "LevelRendererMixin",
+    "OptionsAccessor",
+    "WindowMixin"
   ],
   "injectors": {
     "defaultRequire": 1
