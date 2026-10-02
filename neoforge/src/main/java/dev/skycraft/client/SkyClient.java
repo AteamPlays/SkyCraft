@@ -47,6 +47,7 @@ public final class SkyClient {
             mirrorReadyLogged = false;
             testCollisionReadyLogged = false;
             realCollisionReadyLogged = false;
+            RenderProbe.reset();
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
         }
 
@@ -105,6 +106,7 @@ public final class SkyClient {
                                 "SkyCraft: real-Skyrim floor verified; player released at ({}, {}, {}), teleportAck={}",
                                 SKY.x, SKY.y, SKY.z, SKY.teleportSeq
                             );
+                            RenderProbe.send(player);
                         }
                     }
                 } else {
