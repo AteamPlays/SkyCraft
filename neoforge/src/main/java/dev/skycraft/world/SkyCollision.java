@@ -160,6 +160,7 @@ public final class SkyCollision {
         TRIS.clear();
         KNOWN_REGIONS.clear();
         epoch = newEpoch;
+        SkyrimCollisionMirror.acceptClear(newEpoch);
         SkyCraft.LOG.info("SkyCraft: collision cleared (epoch {})", newEpoch);
     }
 
@@ -177,6 +178,10 @@ public final class SkyCollision {
         int messageEpoch = s.getInt(p + 24L);
         adoptEpochIfFresh(messageEpoch);
         if (messageEpoch != epoch) return;
+
+        // One collision-ring consumer owns the stream. Feed the same COL_REGION
+        // payload into the coarse Sable proxy mirror before marking the region known.
+        SkyrimCollisionMirror.acceptRegion(s, p);
 
         for (int rx = Math.floorDiv(minX, REGION_SIZE); rx <= Math.floorDiv(maxX, REGION_SIZE); rx++) {
             for (int ry = Math.floorDiv(minY, REGION_SIZE); ry <= Math.floorDiv(maxY, REGION_SIZE); ry++) {
