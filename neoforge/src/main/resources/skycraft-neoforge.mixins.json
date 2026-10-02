@@ -7,7 +7,8 @@
     "OptionsAccessor",
     "GameRendererMixin",
     "KeyboardHandlerInvoker",
-    "MouseHandlerInvoker"
+    "MouseHandlerInvoker",
+    "InputConstantsMixin"
   ],
   "injectors": {
     "defaultRequire": 1
