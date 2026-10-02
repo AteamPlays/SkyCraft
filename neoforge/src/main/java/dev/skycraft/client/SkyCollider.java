@@ -29,7 +29,7 @@ public final class SkyCollider {
             (box.minX + box.maxX) * 0.5,
             box.minY,
             (box.minZ + box.maxZ) * 0.5,
-            box.getXsize() * 0.5,
+            Math.max(0.20, box.getXsize() * 0.45), // 10% Skyrim-only inset; vanilla/Create collision keeps full width
             box.getYsize(),
             step,
             player.onGround(),
