@@ -1,25 +1,30 @@
 package dev.skycraft.client;
 
 import dev.skycraft.SkyCraft;
+import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.world.SkyrimCollisionMirror;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 
 /**
  * Safe player-state bridge for the 1.21.1 backport.
  *
- * Until Skyrim collision has been ported, MC_IN_WORLD intentionally stays clear.
- * That keeps Skyrim authoritative and prevents an incomplete Minecraft client from
- * moving the Skyrim player.
+ * Normal development keeps Skyrim authoritative until the collision/player-control
+ * port is complete. The fake-Skyrim harness opts into a controlled test mode so
+ * we can prove spawn, collision and the handshake without launching the real game.
  */
 public final class SkyClient {
+    private static final boolean TEST_MODE = Boolean.getBoolean("skycraft.testMode");
+
     private static final SkyLink.SkyState SKY = new SkyLink.SkyState();
     private static final SkyLink.McState MC = new SkyLink.McState();
 
     private static boolean linked;
     private static boolean mirrorReadyLogged;
+    private static boolean testCollisionReadyLogged;
     private static long frameCounter;
 
     private SkyClient() {}
@@ -39,8 +44,11 @@ public final class SkyClient {
         if (nowLinked != linked) {
             linked = nowLinked;
             mirrorReadyLogged = false;
+            testCollisionReadyLogged = false;
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
-            if (linked) SkyrimCollisionMirror.start();
+            if (linked) {
+                SkyrimCollisionMirror.start();
+            }
         }
 
         if (!linked || !SkyLink.readSkyState(SKY)) {
@@ -54,12 +62,30 @@ public final class SkyClient {
         }
 
         LocalPlayer player = minecraft.player;
-        MC.flags = 0; // Do not hand movement authority to Minecraft yet.
+        MC.flags = 0;
         MC.frameCounter = ++frameCounter;
 
         if (player != null && MirrorWorld.isReady(minecraft)) {
-            // During bring-up, Skyrim owns look direction too. This proves coordinate/state
-            // exchange while leaving all Skyrim movement safely untouched.
+            if (TEST_MODE) {
+                // The mirror world is empty by design. Hold both the client and integrated
+                // server player at Skyrim's requested coordinates until the streamed floor
+                // has actually been materialized, otherwise vanilla's void kill triggers.
+                boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollision();
+                holdTestPlayer(minecraft, player, !collisionReady);
+
+                if (collisionReady && !testCollisionReadyLogged) {
+                    testCollisionReadyLogged = true;
+                    SkyCraft.LOG.info(
+                        "SkyCraft: fake-Skyrim collision is live at the mirror world; releasing test hold"
+                    );
+                }
+
+                if (collisionReady) {
+                    MC.flags |= Proto.MC_IN_WORLD;
+                    MC.teleportAck = SKY.teleportSeq;
+                }
+            }
+
             if (minecraft.screen == null && SKY.inGame() && !SKY.loading()) {
                 player.setYRot(SKY.yaw);
                 player.setXRot(SKY.pitch);
@@ -96,11 +122,57 @@ public final class SkyClient {
             if (!mirrorReadyLogged) {
                 mirrorReadyLogged = true;
                 SkyCraft.LOG.info(
-                    "SkyCraft: NeoForge mirror world ready; Minecraft authority remains disabled until collision is ported"
+                    TEST_MODE
+                        ? "SkyCraft: NeoForge mirror world ready in fake-Skyrim test mode"
+                        : "SkyCraft: NeoForge mirror world ready; Minecraft authority remains disabled until collision is ported"
                 );
             }
         }
 
         SkyLink.writeMcState(MC);
+    }
+
+    private static void holdTestPlayer(Minecraft minecraft, LocalPlayer player, boolean hold) {
+        // Client-side immediately, so the camera never spends a frame falling at the void spawn.
+        if (hold) {
+            player.setDeltaMovement(Vec3.ZERO);
+            player.setPos(SKY.x, SKY.y, SKY.z);
+            player.xo = SKY.x;
+            player.yo = SKY.y;
+            player.zo = SKY.z;
+            player.resetFallDistance();
+        }
+
+        var server = minecraft.getSingleplayerServer();
+        if (server == null) {
+            return;
+        }
+
+        var uuid = player.getUUID();
+        double x = SKY.x, y = SKY.y, z = SKY.z;
+        float yaw = SKY.yaw, pitch = SKY.pitch;
+
+        server.execute(() -> {
+            ServerPlayer serverPlayer = server.getPlayerList().getPlayer(uuid);
+            if (serverPlayer == null) {
+                return;
+            }
+
+            if (hold) {
+                serverPlayer.setNoGravity(true);
+                serverPlayer.setDeltaMovement(Vec3.ZERO);
+                serverPlayer.teleportTo(x, y, z);
+                serverPlayer.setYRot(yaw);
+                serverPlayer.setXRot(pitch);
+                serverPlayer.resetFallDistance();
+            } else if (serverPlayer.isNoGravity()) {
+                // One final snap onto the fake Skyrim start position, then let vanilla
+                // gravity/collision take over on the proxy floor.
+                serverPlayer.teleportTo(x, y, z);
+                serverPlayer.setDeltaMovement(Vec3.ZERO);
+                serverPlayer.resetFallDistance();
+                serverPlayer.setNoGravity(false);
+            }
+        });
     }
 }
