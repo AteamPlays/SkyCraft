@@ -46,4 +46,14 @@ public final class SkyCollider {
             List.of()
         );
     }
+
+    /** Highest exact Skyrim surface near the feet, matching original SkyCraft spawn recovery. */
+    public static double groundAt(double x, double y, double z, double maxAbove) {
+        List<SkyTri> tris = new ArrayList<>();
+        SkyCollision.trianglesNear(
+            new AABB(x - 1.0, y - 4.0, z - 1.0, x + 1.0, y + maxAbove + 1.0, z + 1.0),
+            tris
+        );
+        return TriCollider.groundAt(tris, x, y, z, maxAbove);
+    }
 }
