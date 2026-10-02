@@ -38,6 +38,17 @@ public abstract class BlockCollisionsMixin {
     ) {
         VoxelShape blockShape = original.call(state, level, pos, context);
 
+        // The walls of holes dug into Skyrim's geometry are virtual too. Once a surface cell is
+        // removed, adjacent interior material becomes solid so the hole is closed like Minecraft.
+        if (state.isAir()) {
+            VoxelShape wall = dev.skycraft.world.SkyDig.wallShape(
+                (net.minecraft.world.level.CollisionGetter) level, pos
+            );
+            if (wall != null) {
+                blockShape = blockShape.isEmpty() ? wall : Shapes.or(blockShape, wall);
+            }
+        }
+
         if (context instanceof EntityCollisionContext entityContext
             && SkyCollision.usesSmoothCollider(entityContext.getEntity())) {
             return blockShape;
