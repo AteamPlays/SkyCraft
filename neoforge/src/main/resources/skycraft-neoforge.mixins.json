@@ -10,7 +10,8 @@
     "MouseHandlerInvoker",
     "InputConstantsMixin",
     "MinecraftMixin",
-    "ScreenMixin"
+    "ScreenMixin",
+    "MinecraftAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
