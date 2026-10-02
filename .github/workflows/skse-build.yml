@@ -3,10 +3,8 @@ name: SKSE plugin build
 on:
   push:
     branches: [ "neoforge-1.21.1" ]
-    paths:
-      - "skse/**"
-      - "protocol/**"
-      - ".github/workflows/skse-build.yml"
+    # Keep the native DLL paired with every gameplay build. Java-only changes can still rely
+    # on protocol/native behavior, and this avoids stale SKSE artifacts during rapid porting.
   workflow_dispatch:
 
 concurrency:
@@ -50,7 +48,6 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force artifact\SKSE\Plugins | Out-Null
           Copy-Item skse\build-ci\RelWithDebInfo\SkyCraft.dll artifact\SKSE\Plugins\SkyCraft.dll
-          Copy-Item skse\build-ci\RelWithDebInfo\SkyCraft.pdb artifact\SKSE\Plugins\SkyCraft.pdb
           $ini = Get-Content skse\SkyCraft.ini -Raw
           $ini = $ini -replace 'bStartWithSkyrim\s*=\s*1', 'bStartWithSkyrim = 0'
           Set-Content artifact\SKSE\Plugins\SkyCraft.ini $ini -NoNewline
