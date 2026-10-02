@@ -1,6 +1,7 @@
 package dev.skycraft.mixin;
 
 import dev.skycraft.client.SkyDigClient;
+import dev.skycraft.client.AuxWorldExporter;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -20,5 +21,6 @@ public abstract class ClientLevelDigMixin {
         CallbackInfo ci
     ) {
         SkyDigClient.blockChanged((ClientLevel)(Object)this, pos, oldState, newState);
+        AuxWorldExporter.markDirty(pos);
     }
 }
