@@ -4,12 +4,12 @@ license="MIT"
 
 [[mods]]
 modId="skycraft"
-version="0.1.2-neoforge-alpha.1"
+version="0.1.2-neoforge-alpha.2"
 displayName="SkyCraft (NeoForge)"
 authors="chasmlol; NeoForge port for AteamPlays"
 description='''
 Play Skyrim with Minecraft physics, inventory and viewmodels.
-NeoForge 1.21.1 compatibility port.
+NeoForge 1.21.1 compatibility port with optional Create/Flywheel integration.
 '''
 
 [[dependencies.skycraft]]
@@ -26,6 +26,12 @@ versionRange="[1.21.1]"
 ordering="NONE"
 side="CLIENT"
 
+[[dependencies.skycraft]]
+modId="create"
+type="optional"
+versionRange="[6.0.10,6.1.0)"
+ordering="AFTER"
+side="CLIENT"
 
 [[mixins]]
 config="skycraft-neoforge.mixins.json"
