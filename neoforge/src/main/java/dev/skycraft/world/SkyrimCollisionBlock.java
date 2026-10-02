@@ -47,9 +47,11 @@ public final class SkyrimCollisionBlock extends Block {
         // Original SkyCraft deliberately excludes the local player from the coarse Skyrim
         // voxel/proxy collider. The local player is resolved against exact streamed triangles
         // in SkyCollider; applying both makes walls/corners sticky and causes double collision.
-        if (context instanceof EntityCollisionContext entityContext
-            && entityContext.getEntity() instanceof net.minecraft.client.player.LocalPlayer
-            && dev.skycraft.client.SkyClient.linked()) {
+        // Old development builds persisted thousands of proxy blocks in the mirror save.
+        // They are now legacy only: while linked, virtual SkyCollision owns collision entirely.
+        // Keeping these inert prevents an old test save from reintroducing coarse wall/doorframe
+        // collisions on either the client or integrated server.
+        if (dev.skycraft.client.SkyClient.linked()) {
             return Shapes.empty();
         }
         return SHAPES[state.getValue(HEIGHT)];
@@ -57,7 +59,9 @@ public final class SkyrimCollisionBlock extends Block {
 
     @Override
     protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
-        // Still ray-pickable so Minecraft blocks can eventually be placed against Skyrim surfaces.
+        if (dev.skycraft.client.SkyClient.linked()) {
+            return Shapes.empty();
+        }
         return SHAPES[state.getValue(HEIGHT)];
     }
 
