@@ -1,0 +1,59 @@
+name: SKSE plugin build
+
+on:
+  push:
+    branches: [ "neoforge-1.21.1" ]
+    paths:
+      - "skse/**"
+      - "protocol/**"
+      - ".github/workflows/skse-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: skycraft-skse-port
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Bootstrap vcpkg
+        shell: cmd
+        run: |
+          if not exist .tools\vcpkg git clone --depth 1 https://github.com/microsoft/vcpkg .tools\vcpkg
+          call .tools\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Configure SKSE plugin
+        shell: cmd
+        run: >
+          cmake -S skse -B skse\build-ci
+          -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="%CD%\.tools\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+          -DSKYCRAFT_DEPLOY_DIR=
+
+      - name: Build SKSE plugin
+        shell: cmd
+        run: cmake --build skse\build-ci --config RelWithDebInfo --parallel
+
+      - name: Stage real-Skyrim dev package
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force artifact\SKSE\Plugins | Out-Null
+          Copy-Item skse\build-ci\RelWithDebInfo\SkyCraft.dll artifact\SKSE\Plugins\SkyCraft.dll
+          Copy-Item skse\build-ci\RelWithDebInfo\SkyCraft.pdb artifact\SKSE\Plugins\SkyCraft.pdb
+          $ini = Get-Content skse\SkyCraft.ini -Raw
+          $ini = $ini -replace 'bStartWithSkyrim\s*=\s*1', 'bStartWithSkyrim = 0'
+          Set-Content artifact\SKSE\Plugins\SkyCraft.ini $ini -NoNewline
+
+      - name: Upload SKSE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SkyCraft-SKSE-NeoForge-dev
+          path: artifact
+          if-no-files-found: error
