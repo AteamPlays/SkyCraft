@@ -11,6 +11,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Pose;
@@ -198,6 +199,21 @@ public final class SkyrimActorEntity extends LivingEntity {
     @Override
     protected SoundEvent getDeathSound() {
         return null;
+    }
+
+    @Override
+    public Iterable<ItemStack> getArmorSlots() {
+        return java.util.List.of();
+    }
+
+    @Override
+    public ItemStack getItemBySlot(EquipmentSlot slot) {
+        return ItemStack.EMPTY;
+    }
+
+    @Override
+    public void setItemSlot(EquipmentSlot slot, ItemStack stack) {
+        // Skyrim owns the real actor's equipment; the proxy only exists for hit detection.
     }
 
     @Override
