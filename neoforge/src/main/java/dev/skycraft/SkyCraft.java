@@ -1,6 +1,7 @@
 package dev.skycraft;
 
 import dev.skycraft.client.SkyClient;
+import dev.skycraft.combat.SkyCombat;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.world.SkyCollision;
 import dev.skycraft.world.SkyDig;
@@ -22,6 +23,7 @@ public final class SkyCraft {
     public SkyCraft(IEventBus modBus) {
         SkyBlocks.register(modBus);
         SkyDig.register(modBus);
+        SkyCombat.register(modBus);
         LOG.info("SkyCraft: NeoForge 1.21.1 core loaded");
         SkyLink.announceRunning();
         SkyCollision.startConsumer();
