@@ -3,6 +3,7 @@ package dev.skycraft.client;
 import dev.skycraft.SkyCraft;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
+import dev.skycraft.mixin.OptionsAccessor;
 import dev.skycraft.world.SkyrimCollisionMirror;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -48,6 +49,11 @@ public final class SkyClient {
             testCollisionReadyLogged = false;
             realCollisionReadyLogged = false;
             RenderProbe.reset();
+            if (linked) {
+                Minecraft minecraft = Minecraft.getInstance();
+                ((OptionsAccessor) (Object) minecraft.options).skycraft$setPauseOnLostFocus(false);
+                SkyCraft.LOG.info("SkyCraft: background focus mode enabled; Minecraft will not pause when Skyrim has focus");
+            }
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
         }
 
