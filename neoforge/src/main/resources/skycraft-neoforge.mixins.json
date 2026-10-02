@@ -23,7 +23,8 @@
     "PressurePlateMixin",
     "FallingBlockMixin",
     "EntityWaterMixin",
-    "FlowingFluidMixin"
+    "FlowingFluidMixin",
+    "ServerExplosionMixin"
   ],
   "injectors": {
     "defaultRequire": 1
