@@ -5,7 +5,7 @@ import dev.skycraft.SkyCraft;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.Camera;
 import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL15C;
 import org.lwjgl.opengl.GL21C;
@@ -131,15 +131,18 @@ public final class FrameExporter {
             target.unbindRead();
         }
 
-        LocalPlayer player = minecraft.player;
-        Vec3Like eye = new Vec3Like(player.getEyePosition().x, player.getEyePosition().y, player.getEyePosition().z);
+        // Use the camera that actually rendered this frame. This matters for F5, Create seats,
+        // contraption-mounted cameras and future Aeronautics cockpits: player eye metadata is not
+        // necessarily the view that produced the captured depth buffer.
+        Camera camera = minecraft.gameRenderer.getMainCamera();
+        var cameraPos = camera.getPosition();
         capture.far = Math.max(NEAR + 1.0F, minecraft.options.getEffectiveRenderDistance() * 16.0F * 4.0F);
         capture.fov = minecraft.options.fov().get().floatValue();
-        capture.camX = eye.x;
-        capture.camY = eye.y;
-        capture.camZ = eye.z;
-        capture.yaw = player.getYRot();
-        capture.pitch = player.getXRot();
+        capture.camX = cameraPos.x;
+        capture.camY = cameraPos.y;
+        capture.camZ = cameraPos.z;
+        capture.yaw = camera.getYRot();
+        capture.pitch = camera.getXRot();
 
         // Split the frame exactly like the passthrough reference: world/depth are already queued;
         // everything rendered after this clear becomes the screen-space hand/HUD layer.
@@ -317,7 +320,4 @@ public final class FrameExporter {
         }
         return cleared;
     }
-
-    /** Avoid retaining a Minecraft Vec3 object in the ring. */
-    private record Vec3Like(double x, double y, double z) {}
 }
