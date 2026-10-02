@@ -24,7 +24,9 @@
     "FallingBlockMixin",
     "EntityWaterMixin",
     "FlowingFluidMixin",
-    "ServerExplosionMixin"
+    "ServerExplosionMixin",
+    "ServerPlayerMixin",
+    "AbstractArrowMixin"
   ],
   "injectors": {
     "defaultRequire": 1
