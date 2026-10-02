@@ -50,7 +50,18 @@ $game = Find-Skyrim $SkyrimDir
 $skyrimExe = Join-Path $game "SkyrimSE.exe"
 $skse = Join-Path $game "skse64_loader.exe"
 $plugins = Join-Path $game "Data\SKSE\Plugins"
-$addressLibrary = Get-ChildItem $plugins -Filter "versionlib-*.bin" -ErrorAction SilentlyContinue | Select-Object -First 1
+$skyrimVersion = Get-FileVersionText $skyrimExe
+$versionParts = $skyrimVersion -split '\.'
+$expectedAddressName = $null
+if ($versionParts.Count -ge 4) {
+    $expectedAddressName = "versionlib-$($versionParts[0])-$($versionParts[1])-$($versionParts[2])-$($versionParts[3]).bin"
+}
+
+$addressLibraries = @(Get-ChildItem $plugins -Filter "versionlib-*.bin" -ErrorAction SilentlyContinue)
+$addressLibrary = $null
+if ($expectedAddressName) {
+    $addressLibrary = $addressLibraries | Where-Object { $_.Name -ieq $expectedAddressName } | Select-Object -First 1
+}
 
 $skseInstalled = Test-Path $skse
 $addressInstalled = $null -ne $addressLibrary
@@ -58,9 +69,9 @@ $addressInstalled = $null -ne $addressLibrary
 Write-Host ""
 Write-Host "SkyCraft real-Skyrim environment"
 Write-Host "  Skyrim:          $game"
-Write-Host "  Skyrim runtime:  $(Get-FileVersionText $skyrimExe)"
+Write-Host "  Skyrim runtime:  $skyrimVersion"
 Write-Host "  SKSE loader:     $(if ($skseInstalled) { Get-FileVersionText $skse } else { 'MISSING' })"
-Write-Host "  Address Library: $(if ($addressInstalled) { $addressLibrary.Name } else { 'MISSING' })"
+Write-Host "  Address Library: $(if ($addressInstalled) { $addressLibrary.Name } elseif ($addressLibraries.Count -gt 0) { "NO MATCH (found $($addressLibraries.Count) versionlib files)" } else { 'MISSING' })"
 Write-Host ""
 
 if (-not $skseInstalled -or -not $addressInstalled) {
@@ -69,7 +80,11 @@ if (-not $skseInstalled -or -not $addressInstalled) {
         Write-Host "  - SKSE64 matching the Skyrim runtime above"
     }
     if (-not $addressInstalled) {
-        Write-Host "  - Address Library for SKSE Plugins"
+        if ($expectedAddressName) {
+            Write-Host "  - Address Library file matching this runtime: $expectedAddressName"
+        } else {
+            Write-Host "  - Address Library for SKSE Plugins"
+        }
     }
     if ($CheckOnly) {
         exit 2
