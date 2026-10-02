@@ -23,6 +23,13 @@ public final class SkyCraft {
         LOG.info("SkyCraft: NeoForge 1.21.1 core loaded");
         SkyLink.announceRunning();
         SkyCollision.startConsumer();
+        // Match original SkyCraft: every Player, including the integrated-server copy,
+        // bypasses Skyrim's coarse voxel layer. The local client resolves movement against
+        // exact Skyrim triangles; the server therefore validates the same smooth position
+        // instead of rubber-banding it against voxel approximations.
+        SkyCollision.setSmoothCollider(entity ->
+            entity instanceof net.minecraft.world.entity.player.Player && SkyClient.linked()
+        );
         NeoForge.EVENT_BUS.addListener(SkyCraft::onClientTick);
     }
 
