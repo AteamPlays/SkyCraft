@@ -21,7 +21,9 @@
     "ProjectileMixin",
     "ProjectileUtilMixin",
     "PressurePlateMixin",
-    "FallingBlockMixin"
+    "FallingBlockMixin",
+    "EntityWaterMixin",
+    "FlowingFluidMixin"
   ],
   "injectors": {
     "defaultRequire": 1
