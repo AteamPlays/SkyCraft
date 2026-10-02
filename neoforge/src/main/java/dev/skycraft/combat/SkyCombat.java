@@ -181,7 +181,7 @@ public final class SkyCombat {
         )) {
             if (!entity.isRemoved()
                 && (entity instanceof net.minecraft.world.entity.item.ItemEntity
-                    || entity instanceof net.minecraft.world.entity.projectile.arrow.AbstractArrow)) {
+                    || entity instanceof net.minecraft.world.entity.projectile.AbstractArrow)) {
                 entity.playerTouch(player);
             }
         }
