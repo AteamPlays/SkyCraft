@@ -3197,6 +3197,23 @@ float4 OverlayPS(float4 pos : SV_Position) : SV_Target
 			}
 		}
 
+		void Pump(ID3D11Device* a_device, ID3D11DeviceContext* a_context)
+		{
+			if (!Init(a_device)) {
+				return;
+			}
+			DrainMessages(a_context);
+			{
+				Perf::Scope readbacks(Perf::kReadbacks);
+				Dig::ServiceReadbacks(a_device, a_context);
+			}
+			{
+				Perf::Scope grass(Perf::kGrass);
+				Dig::ServiceGrass(a_device, a_context);
+			}
+			ReadProbe(a_context);
+		}
+
 		void Draw(ID3D11Device* a_device, ID3D11DeviceContext* a_context, IDXGISwapChain* a_swapChain)
 		{
 			if (!Init(a_device)) {
