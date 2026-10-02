@@ -88,7 +88,7 @@ public final class AuxWorldExporter {
             seenGeneration = generation;
             seedLoadedSections(minecraft, level, pcx, pcz);
         } else if (pcx != seededPlayerChunkX || pcz != seededPlayerChunkZ) {
-            seedLoadedSections(minecraft, level, pcx, pcz);
+            seedEnteringChunks(minecraft, level, seededPlayerChunkX, seededPlayerChunkZ, pcx, pcz);
         }
 
         for (int i = 0; i < SECTIONS_PER_TICK; i++) {
@@ -121,19 +121,54 @@ public final class AuxWorldExporter {
 
         for (int cx = pcx - radius; cx <= pcx + radius; cx++) {
             for (int cz = pcz - radius; cz <= pcz + radius; cz++) {
-                LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
-                if (chunk == null) continue;
+                seedChunk(level, cx, cz);
+            }
+        }
+    }
 
-                LevelChunkSection[] sections = chunk.getSections();
-                for (int index = 0; index < sections.length; index++) {
-                    int sy = chunk.getSectionYFromSectionIndex(index);
-                    long key = SectionPos.asLong(cx, sy, cz);
-                    if (!sections[index].hasOnlyAir()
-                        || SENT_SOLIDS.contains(key)
-                        || SENT_LIGHTS.contains(key)) {
-                        markDirty(cx, sy, cz);
-                    }
+    /**
+     * Moving one chunk should not rescan the entire render-distance square. Seed only chunks that
+     * entered the radius; normal block updates are already tracked by ClientLevelDigMixin.
+     */
+    private static void seedEnteringChunks(
+        Minecraft minecraft,
+        ClientLevel level,
+        int oldX,
+        int oldZ,
+        int newX,
+        int newZ
+    ) {
+        int radius = minecraft.options.getEffectiveRenderDistance() + 1;
+        int oldMinX = oldX - radius;
+        int oldMaxX = oldX + radius;
+        int oldMinZ = oldZ - radius;
+        int oldMaxZ = oldZ + radius;
+
+        seededPlayerChunkX = newX;
+        seededPlayerChunkZ = newZ;
+
+        for (int cx = newX - radius; cx <= newX + radius; cx++) {
+            for (int cz = newZ - radius; cz <= newZ + radius; cz++) {
+                if (cx >= oldMinX && cx <= oldMaxX && cz >= oldMinZ && cz <= oldMaxZ) {
+                    continue;
                 }
+                seedChunk(level, cx, cz);
+            }
+        }
+    }
+
+    private static void seedChunk(ClientLevel level, int cx, int cz) {
+        LevelChunk chunk = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+        if (chunk == null) return;
+
+        LevelChunkSection[] sections = chunk.getSections();
+        for (int index = 0; index < sections.length; index++) {
+            int sy = chunk.getSectionYFromSectionIndex(index);
+            long key = SectionPos.asLong(cx, sy, cz);
+            if (!sections[index].hasOnlyAir()
+                || SENT_SOLIDS.contains(key)
+                || SENT_LIGHTS.contains(key)) {
+                markDirty(cx, sy, cz);
             }
         }
     }
