@@ -1,6 +1,7 @@
 param(
     [string]$SkyrimDir = "",
-    [switch]$InstallOnly
+    [switch]$InstallOnly,
+    [switch]$CheckOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -57,6 +58,19 @@ if (-not $addressLibrary) {
     throw "Address Library for SKSE Plugins (Anniversary Edition) was not detected in Data\SKSE\Plugins."
 }
 
+Write-Host ""
+Write-Host "SkyCraft real-Skyrim environment"
+Write-Host "  Skyrim:          $game"
+Write-Host "  Skyrim runtime:  $(Get-FileVersionText (Join-Path $game \"SkyrimSE.exe\"))"
+Write-Host "  SKSE loader:     $(Get-FileVersionText $skse)"
+Write-Host "  Address Library: $($addressLibrary.Name)"
+Write-Host ""
+
+if ($CheckOnly) {
+    Write-Host "Environment check passed."
+    exit 0
+}
+
 $devPlugin = Join-Path $root "dev-skse\SKSE\Plugins\SkyCraft.dll"
 $devIni = Join-Path $root "dev-skse\SKSE\Plugins\SkyCraft.ini"
 if (-not (Test-Path $devPlugin)) {
@@ -66,15 +80,7 @@ if (-not (Test-Path $devPlugin)) {
 New-Item -ItemType Directory -Force $plugins | Out-Null
 Copy-Item $devPlugin (Join-Path $plugins "SkyCraft.dll") -Force
 Copy-Item $devIni (Join-Path $plugins "SkyCraft.ini") -Force
-
-Write-Host ""
-Write-Host "SkyCraft real-Skyrim dev setup"
-Write-Host "  Skyrim:  $game"
-Write-Host "  Runtime: $(Get-FileVersionText (Join-Path $game \"SkyrimSE.exe\"))"
-Write-Host "  SKSE:     $(Get-FileVersionText $skse)"
-Write-Host "  Plugin:   installed"
-Write-Host "  Address Library: $($addressLibrary.Name)"
-Write-Host ""
+Write-Host "SkyCraft.dll installed into Data\SKSE\Plugins."
 
 if ($InstallOnly) {
     Write-Host "Install-only requested; not launching."
