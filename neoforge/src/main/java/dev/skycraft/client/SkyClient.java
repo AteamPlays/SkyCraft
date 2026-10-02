@@ -155,6 +155,7 @@ public final class SkyClient {
         }
 
         MirrorWorld.tick(minecraft, SKY);
+        SkyDigClient.tick(minecraft);
 
         LocalPlayer player = minecraft.player;
         if (player == null || !MirrorWorld.isReady(minecraft)) {
