@@ -44,14 +44,13 @@ public final class SkyrimCollisionBlock extends Block {
 
     @Override
     protected VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
-        // Original SkyCraft deliberately excludes the local player from the coarse Skyrim
-        // voxel/proxy collider. The local player is resolved against exact streamed triangles
-        // in SkyCollider; applying both makes walls/corners sticky and causes double collision.
-        // Old development builds persisted thousands of proxy blocks in the mirror save.
-        // They are now legacy only: while linked, virtual SkyCollision owns collision entirely.
-        // Keeping these inert prevents an old test save from reintroducing coarse wall/doorframe
-        // collisions on either the client or integrated server.
-        if (dev.skycraft.client.SkyClient.linked()) {
+        // The Minecraft player already uses exact streamed Skyrim triangles. Feeding this coarse
+        // proxy to a Player as well causes sticky walls/doorframes and server rubber-banding.
+        // Sable/Rapier, falling blocks, Create contraptions and other non-player collision queries
+        // still receive the stable BlockState shape, which is what lets Aeronautics hit Skyrim.
+        if (dev.skycraft.client.SkyClient.linked()
+            && context instanceof EntityCollisionContext entityContext
+            && entityContext.getEntity() instanceof net.minecraft.world.entity.player.Player) {
             return Shapes.empty();
         }
         return SHAPES[state.getValue(HEIGHT)];
@@ -59,6 +58,7 @@ public final class SkyrimCollisionBlock extends Block {
 
     @Override
     protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        // Never let the crosshair/select outline reveal the invisible physics proxy while linked.
         if (dev.skycraft.client.SkyClient.linked()) {
             return Shapes.empty();
         }
