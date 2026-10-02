@@ -4,8 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "EntityCollideMixin",
-    "LevelRendererMixin",
-    "OptionsAccessor"
+    "OptionsAccessor",
+    "GameRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
