@@ -162,7 +162,7 @@ public final class SkyClient {
 
         if (TEST_MODE) {
             boolean ready = SkyCollision.readyAround(SKY.x, SKY.y, SKY.z);
-            syncPlayer(minecraft, player, true, SKY.x, SKY.y, SKY.z);
+            pinPlayerAndServer(minecraft, player, new Vec3(SKY.x, SKY.y, SKY.z), true);
 
             if (ready && !testCollisionReadyLogged) {
                 testCollisionReadyLogged = true;
