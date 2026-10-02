@@ -25,6 +25,7 @@ public final class SkyClient {
     private static boolean linked;
     private static boolean mirrorReadyLogged;
     private static boolean testCollisionReadyLogged;
+    private static boolean realCollisionReadyLogged;
     private static long frameCounter;
 
     private SkyClient() {}
@@ -45,6 +46,7 @@ public final class SkyClient {
             linked = nowLinked;
             mirrorReadyLogged = false;
             testCollisionReadyLogged = false;
+            realCollisionReadyLogged = false;
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
         }
 
@@ -63,16 +65,12 @@ public final class SkyClient {
         MC.frameCounter = ++frameCounter;
 
         if (player != null && MirrorWorld.isReady(minecraft)) {
-            if (TEST_MODE) {
-                // The mirror world is empty by design. Hold both the client and integrated
-                // server player at Skyrim's requested coordinates until the streamed floor
-                // has actually been materialized, otherwise vanilla's void kill triggers.
-                boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollisionBelow(SKY.x, SKY.y, SKY.z);
+            boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollisionBelow(SKY.x, SKY.y, SKY.z);
 
-                // Keep the harness pinned even after collision is verified. Input/movement
-                // authority is a later milestone; for this test we only prove that the exact
-                // Skyrim coordinate and its floor are synchronized without falling into void.
-                holdTestPlayer(minecraft, player, true);
+            if (TEST_MODE) {
+                // Keep the fake harness pinned forever. It proves the shared-memory/collision
+                // handshake without introducing movement authority into that deterministic test.
+                syncPlayerToSkyrim(minecraft, player, true);
 
                 if (collisionReady && !testCollisionReadyLogged) {
                     testCollisionReadyLogged = true;
@@ -85,6 +83,35 @@ public final class SkyClient {
                 if (collisionReady) {
                     MC.flags |= Proto.MC_IN_WORLD;
                     MC.teleportAck = SKY.teleportSeq;
+                }
+            } else {
+                // A real Skyrim run starts from whatever position/noGravity state the persistent
+                // mirror save last had (the fake harness deliberately leaves noGravity enabled).
+                // Whenever Skyrim requests a teleport, pin Minecraft at Skyrim's live position
+                // until the streamed proxy floor is actually present. Then perform one final snap,
+                // restore gravity, acknowledge the teleport, and let vanilla/exact collision take over.
+                boolean awaitingTeleport = MC.teleportAck != SKY.teleportSeq;
+
+                if (awaitingTeleport) {
+                    syncPlayerToSkyrim(minecraft, player, !collisionReady);
+
+                    if (collisionReady) {
+                        MC.teleportAck = SKY.teleportSeq;
+                        MC.flags |= Proto.MC_IN_WORLD;
+
+                        if (!realCollisionReadyLogged) {
+                            realCollisionReadyLogged = true;
+                            SkyCraft.LOG.info(
+                                "SkyCraft: real-Skyrim floor verified; player released at ({}, {}, {}), teleportAck={}",
+                                SKY.x, SKY.y, SKY.z, SKY.teleportSeq
+                            );
+                        }
+                    }
+                } else {
+                    // Keep advertising authority after the initial handshake. Also clear any
+                    // stale noGravity bit left in the integrated-player save by an older test.
+                    MC.flags |= Proto.MC_IN_WORLD;
+                    releaseStaleNoGravity(minecraft, player);
                 }
             }
 
@@ -126,7 +153,7 @@ public final class SkyClient {
                 SkyCraft.LOG.info(
                     TEST_MODE
                         ? "SkyCraft: NeoForge mirror world ready in fake-Skyrim test mode"
-                        : "SkyCraft: NeoForge mirror world ready; Minecraft authority remains disabled until collision is ported"
+                        : "SkyCraft: NeoForge mirror world ready; waiting for real Skyrim floor sync"
                 );
             }
         }
@@ -134,16 +161,16 @@ public final class SkyClient {
         SkyLink.writeMcState(MC);
     }
 
-    private static void holdTestPlayer(Minecraft minecraft, LocalPlayer player, boolean hold) {
-        // Client-side immediately, so the camera never spends a frame falling at the void spawn.
-        if (hold) {
-            player.setDeltaMovement(Vec3.ZERO);
-            player.setPos(SKY.x, SKY.y, SKY.z);
-            player.xo = SKY.x;
-            player.yo = SKY.y;
-            player.zo = SKY.z;
-            player.resetFallDistance();
-        }
+    private static void syncPlayerToSkyrim(Minecraft minecraft, LocalPlayer player, boolean holdGravity) {
+        // Snap client-side immediately so the camera never spends a frame at a stale saved position.
+        player.setDeltaMovement(Vec3.ZERO);
+        player.setPos(SKY.x, SKY.y, SKY.z);
+        player.xo = SKY.x;
+        player.yo = SKY.y;
+        player.zo = SKY.z;
+        player.setYRot(SKY.yaw);
+        player.setXRot(SKY.pitch);
+        player.resetFallDistance();
 
         var server = minecraft.getSingleplayerServer();
         if (server == null) {
@@ -160,20 +187,27 @@ public final class SkyClient {
                 return;
             }
 
-            if (hold) {
-                serverPlayer.setNoGravity(true);
-                serverPlayer.setDeltaMovement(Vec3.ZERO);
-                serverPlayer.teleportTo(x, y, z);
-                serverPlayer.setYRot(yaw);
-                serverPlayer.setXRot(pitch);
-                serverPlayer.resetFallDistance();
-            } else if (serverPlayer.isNoGravity()) {
-                // One final snap onto the fake Skyrim start position, then let vanilla
-                // gravity/collision take over on the proxy floor.
-                serverPlayer.teleportTo(x, y, z);
-                serverPlayer.setDeltaMovement(Vec3.ZERO);
-                serverPlayer.resetFallDistance();
+            serverPlayer.setNoGravity(holdGravity);
+            serverPlayer.setDeltaMovement(Vec3.ZERO);
+            serverPlayer.teleportTo(x, y, z);
+            serverPlayer.setYRot(yaw);
+            serverPlayer.setXRot(pitch);
+            serverPlayer.resetFallDistance();
+        });
+    }
+
+    private static void releaseStaleNoGravity(Minecraft minecraft, LocalPlayer player) {
+        var server = minecraft.getSingleplayerServer();
+        if (server == null) {
+            return;
+        }
+
+        var uuid = player.getUUID();
+        server.execute(() -> {
+            ServerPlayer serverPlayer = server.getPlayerList().getPlayer(uuid);
+            if (serverPlayer != null && serverPlayer.isNoGravity()) {
                 serverPlayer.setNoGravity(false);
+                serverPlayer.resetFallDistance();
             }
         });
     }
