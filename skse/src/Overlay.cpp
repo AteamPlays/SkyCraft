@@ -379,7 +379,11 @@ float4 PSMain(VSOut i) : SV_Target {
 					// New path: what Minecraft actually rendered (including Create/Flywheel/Sable)
 					// is composited with Skyrim using both games' depth buffers.
 					framePassthrough = Passthrough::Draw(device, context, a_swapChain);
-					if (!framePassthrough) {
+					if (framePassthrough) {
+						// Passthrough replaces legacy mesh drawing, not the rest of SkyCraft's native
+						// protocol. Keep consuming dig masks/lights/solids/ragdolls every Present.
+						WorldRender::Pump(device, context);
+					} else {
 						// Keep the original mesh path as a fallback until the framebuffer producer
 						// has published its first complete frame.
 						WorldRender::Draw(device, context, a_swapChain);
