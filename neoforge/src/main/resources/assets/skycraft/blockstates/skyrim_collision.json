@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "height=1": { "model": "skycraft:block/empty" },
+    "height=2": { "model": "skycraft:block/empty" },
+    "height=3": { "model": "skycraft:block/empty" },
+    "height=4": { "model": "skycraft:block/empty" },
+    "height=5": { "model": "skycraft:block/empty" },
+    "height=6": { "model": "skycraft:block/empty" },
+    "height=7": { "model": "skycraft:block/empty" },
+    "height=8": { "model": "skycraft:block/empty" }
+  }
+}
