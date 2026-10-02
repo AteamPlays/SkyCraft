@@ -529,6 +529,8 @@ namespace skycraft::proto
 		kTriGhost = 1u << 2,        // a diggable triangle as it was before blocks were dug out of it:
 		                            // not collision, only for telling what's inside Skyrim's geometry
 		kTriTerrain = 1u << 3,      // the land (a height field)
+		kTriPlayerIgnore = 1u << 4, // small Skyrim props/clutter: raycasts/other physics still see it,
+		                            // but the Minecraft player capsule ignores it to prevent snagging
 	};
 
 	inline constexpr std::uint32_t kTriMaterialShift = 8;
