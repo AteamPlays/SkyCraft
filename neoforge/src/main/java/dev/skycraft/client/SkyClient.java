@@ -6,6 +6,7 @@ import dev.skycraft.link.SkyLink;
 import dev.skycraft.mixin.MinecraftAccessor;
 import dev.skycraft.mixin.OptionsAccessor;
 import dev.skycraft.world.SkyCollision;
+import dev.skycraft.world.SkyWater;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -81,6 +82,7 @@ public final class SkyClient {
                 SkyCraft.LOG.info("SkyCraft: frame-synchronous background mode enabled");
             } else {
                 InputBridge.releaseAll();
+                SkyWater.clear();
                 LocalPlayer player = minecraft.player;
                 unlinkedHold = player != null ? player.position() : null;
             }
@@ -98,6 +100,7 @@ public final class SkyClient {
         }
 
         applyViewportSize(minecraft);
+        SkyWater.refresh();
 
         if (SKY.menuOpen() || SKY.loading()) {
             InputBridge.releaseAll();
