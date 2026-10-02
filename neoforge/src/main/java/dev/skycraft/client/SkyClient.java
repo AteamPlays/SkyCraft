@@ -106,7 +106,9 @@ public final class SkyClient {
                                 "SkyCraft: real-Skyrim floor verified; player released at ({}, {}, {}), teleportAck={}",
                                 SKY.x, SKY.y, SKY.z, SKY.teleportSeq
                             );
-                            RenderProbe.send(player);
+                            if (Boolean.getBoolean("skycraft.renderProbe")) {
+                                RenderProbe.send(player);
+                            }
                         }
                     }
                 } else {
