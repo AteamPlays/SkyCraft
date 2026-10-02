@@ -34,6 +34,7 @@ public final class SkyrimCollisionMirror {
     private static volatile Thread consumer;
     private static volatile int epoch = -1;
     private static volatile long lastCountLog;
+    private static final java.util.concurrent.atomic.AtomicLong APPLIED_UPDATES = new java.util.concurrent.atomic.AtomicLong();
 
     private SkyrimCollisionMirror() {}
 
@@ -47,6 +48,10 @@ public final class SkyrimCollisionMirror {
 
     public static int blockCount() {
         return DESIRED.size();
+    }
+
+    public static boolean hasAppliedCollision() {
+        return APPLIED_UPDATES.get() > 0;
     }
 
     private static void consumeLoop() {
@@ -214,6 +219,7 @@ public final class SkyrimCollisionMirror {
                         }
                     }
                     applied++;
+                    APPLIED_UPDATES.incrementAndGet();
                 }
             } finally {
                 FLUSH_SCHEDULED.set(false);
