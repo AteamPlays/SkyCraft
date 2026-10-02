@@ -354,6 +354,7 @@ namespace skycraft
 					continue;
 				}
 				Body body{ shape, xf, {}, {}, IsStairHelper(collidable.GetCollisionLayer()) };
+				body.playerIgnore = collidable.GetCollisionLayer() == RE::COL_LAYER::kProps;
 				HkAabbToMc(box, k, body.lo, body.hi);
 				if (a_fixed && Dig::IsDiggableCollidable(&collidable)) {
 					body.diggable = true;
@@ -399,6 +400,7 @@ namespace skycraft
 			job.diggable = body.diggable;
 			job.terrain = body.terrain;
 			job.tree = body.tree;
+			job.playerIgnore = body.playerIgnore;
 			if (!GuardedCall(collect, this, body.shape, body.xf, lo, hi, body.helper ? &helpers : &job)) {
 				if (loggedTypes_.insert(-1).second) {
 					logger::warn("collision: faulted reading a Havok shape (type {}); skipping it", static_cast<int>(body.shape->type));
@@ -413,13 +415,14 @@ namespace skycraft
 
 	std::uint32_t Collision::FlagsFor(const Job& a_job, RE::hkpShapeKey a_key) const
 	{
+		std::uint32_t flags = a_job.playerIgnore ? proto::kTriPlayerIgnore : 0;
 		if (!a_job.diggable) {
-			return 0;
+			return flags;
 		}
 		const auto havok = Dig::ShapeMaterial(a_job.top, a_key);
 		const auto material = Dig::MaterialFor(havok, a_job.ref, a_job.tree);
 
-		return proto::kTriDiggable | (a_job.terrain ? proto::kTriTerrain : 0) | (std::uint32_t(material) << proto::kTriMaterialShift);
+		return flags | proto::kTriDiggable | (a_job.terrain ? proto::kTriTerrain : 0) | (std::uint32_t(material) << proto::kTriMaterialShift);
 	}
 
 	void Collision::Collect(const RE::hkpShape* a_shape, const float* a_xf, const float a_lo[3], const float a_hi[3], Job& a_job, int a_depth, RE::hkpShapeKey a_key)
