@@ -165,6 +165,9 @@ namespace skycraft
 		// Main thread, every frame: once the Skyrim player is dead, their Minecraft body replaces
 		// Skyrim's on its ragdoll (a_minecraftBody: Minecraft is connected and in its world).
 		void UpdateRagdoll(RE::PlayerCharacter* a_player, bool a_minecraftBody);
+		// Present hook service path used even by the framebuffer compositor: drains auxiliary
+		// render-ring messages (dig masks, lights, solids, ragdolls, etc.) without drawing meshes.
+		void Pump(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 		// Present hook, before the overlay: drains Minecraft's meshes; draws the blocks, arrows,
 		// items and the outline here only if they couldn't be drawn inside Skyrim's frame.
 		void Draw(ID3D11Device* a_device, ID3D11DeviceContext* a_context, IDXGISwapChain* a_swapChain);
