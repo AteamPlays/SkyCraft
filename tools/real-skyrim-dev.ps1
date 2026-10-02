@@ -71,7 +71,11 @@ Write-Host "SkyCraft real-Skyrim environment"
 Write-Host "  Skyrim:          $game"
 Write-Host "  Skyrim runtime:  $skyrimVersion"
 Write-Host "  SKSE loader:     $(if ($skseInstalled) { Get-FileVersionText $skse } else { 'MISSING' })"
+$existingSkyCraft = Join-Path $plugins "SkyCraft.dll"
+$existingSkyCraftPresent = Test-Path $existingSkyCraft
+
 Write-Host "  Address Library: $(if ($addressInstalled) { $addressLibrary.Name } elseif ($addressLibraries.Count -gt 0) { "NO MATCH (found $($addressLibraries.Count) versionlib files)" } else { 'MISSING' })"
+Write-Host "  Existing SkyCraft.dll: $(if ($existingSkyCraftPresent) { $existingSkyCraft } else { 'none' })"
 Write-Host ""
 
 if (-not $skseInstalled -or -not $addressInstalled) {
