@@ -17,7 +17,11 @@
     "EntityPickMixin",
     "PlayerEdgeMixin",
     "MinecraftDigMixin",
-    "ClientLevelDigMixin"
+    "ClientLevelDigMixin",
+    "ProjectileMixin",
+    "ProjectileUtilMixin",
+    "PressurePlateMixin",
+    "FallingBlockMixin"
   ],
   "injectors": {
     "defaultRequire": 1
