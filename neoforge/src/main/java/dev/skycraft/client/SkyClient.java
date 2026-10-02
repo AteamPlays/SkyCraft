@@ -125,8 +125,17 @@ public final class SkyClient {
             if (awaitingTeleport) {
                 syncPlayerToSkyrim(minecraft, player, !collisionReady);
                 if (collisionReady) {
-                    // Final snap with gravity restored, then acknowledge only after collision exists.
-                    syncPlayerToSkyrim(minecraft, player, false);
+                    // Original SkyCraft lifts the player out of an exact floor surface before
+                    // releasing physics. Skyrim feet can legitimately sit a few centimeters
+                    // inside a triangle, which Minecraft otherwise cannot depenetrate from.
+                    double safeY = SKY.y;
+                    double ground = SkyCollider.groundAt(SKY.x, SKY.y, SKY.z, 2.5);
+                    if (!Double.isNaN(ground) && ground > safeY) {
+                        safeY = ground;
+                        SkyCraft.LOG.info("SkyCraft: lifted player {} blocks out of Skyrim geometry",
+                            String.format("%.3f", safeY - SKY.y));
+                    }
+                    syncPlayerToSkyrim(minecraft, player, false, SKY.x, safeY, SKY.z);
                     MC.teleportAck = SKY.teleportSeq;
                     if (!realCollisionReadyLogged) {
                         realCollisionReadyLogged = true;
@@ -264,11 +273,18 @@ public final class SkyClient {
     }
 
     private static void syncPlayerToSkyrim(Minecraft minecraft, LocalPlayer player, boolean holdGravity) {
+        syncPlayerToSkyrim(minecraft, player, holdGravity, SKY.x, SKY.y, SKY.z);
+    }
+
+    private static void syncPlayerToSkyrim(
+        Minecraft minecraft, LocalPlayer player, boolean holdGravity,
+        double x, double y, double z
+    ) {
         player.setDeltaMovement(Vec3.ZERO);
-        player.setPos(SKY.x, SKY.y, SKY.z);
-        player.xo = SKY.x;
-        player.yo = SKY.y;
-        player.zo = SKY.z;
+        player.setPos(x, y, z);
+        player.xo = x;
+        player.yo = y;
+        player.zo = z;
         player.setYRot(SKY.yaw);
         player.setXRot(SKY.pitch);
         player.resetFallDistance();
@@ -279,7 +295,6 @@ public final class SkyClient {
         }
 
         var uuid = player.getUUID();
-        double x = SKY.x, y = SKY.y, z = SKY.z;
         float yaw = SKY.yaw, pitch = SKY.pitch;
 
         server.execute(() -> {
