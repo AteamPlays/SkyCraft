@@ -14,7 +14,8 @@
     "MinecraftAccessor",
     "BlockCollisionsMixin",
     "CameraZoomMixin",
-    "EntityPickMixin"
+    "EntityPickMixin",
+    "PlayerEdgeMixin"
   ],
   "injectors": {
     "defaultRequire": 1
