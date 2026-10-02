@@ -7,47 +7,82 @@ import java.nio.ByteOrder;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.lwjgl.opengl.GL11C;
+import org.lwjgl.opengl.GL15C;
+import org.lwjgl.opengl.GL21C;
+import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GL32C;
 
 /**
- * Minecraft 1.21.1 framebuffer/depth passthrough.
+ * Asynchronous Minecraft 1.21.1 framebuffer/depth passthrough.
  *
- * At the end of the world pass (before the first-person hand), captures the fully-rendered
- * Minecraft world and depth. Then it clears the main target to real transparent black.
- * At the end of the frame, the hand/HUD/screens that rendered after that clear are captured
- * as a separate overlay. Skyrim receives all three layers and performs depth-aware compositing.
+ * World colour + depth are queued into PBOs at the world/hand boundary. The target is then
+ * cleared transparent and hand/HUD/screens render normally. Their layer is queued into a third
+ * PBO at the end of GameRenderer.render. A three-frame ring publishes only completed GPU copies,
+ * so readback never intentionally stalls Minecraft's render thread.
  */
 public final class FrameExporter {
     private static final float NEAR = 0.05F;
-    private static final long MIN_CAPTURE_NS = 66_000_000L; // ~15 fps proof path; async readback comes next
+    private static final int RING_SIZE = 3;
+    private static final Capture[] RING = new Capture[RING_SIZE];
 
-    private static ByteBuffer world;
-    private static ByteBuffer depth;
-    private static ByteBuffer overlay;
-    private static int allocatedBytes;
-    private static long lastCaptureNs;
-    private static FrameLink.Write pending;
-    private static int pendingW;
-    private static int pendingH;
-    private static float pendingFar;
-    private static float pendingFov;
-    private static double pendingCamX, pendingCamY, pendingCamZ;
-    private static float pendingYaw, pendingPitch;
+    private static int ringNext;
+    private static Capture current;
+    private static ByteBuffer overlayScratch;
+    private static int scratchBytes;
     private static boolean logged;
+    private static boolean loggedDrop;
 
     private FrameExporter() {}
 
-    /** Called from GameRenderer.renderLevel after the world/Forge-last pass and before renderHand. */
-    public static void captureWorld() {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (!SkyClient.linked() || minecraft.player == null || minecraft.level == null || pending != null) {
-            return;
+    private static final class Capture {
+        int worldPbo;
+        int depthPbo;
+        int overlayPbo;
+        int width;
+        int height;
+        int bytes;
+        long fence;
+        boolean busy;
+
+        float far;
+        float fov;
+        double camX, camY, camZ;
+        float yaw, pitch;
+
+        void ensure(int w, int h) {
+            int n = Math.multiplyExact(Math.multiplyExact(w, h), 4);
+            if (worldPbo == 0) {
+                worldPbo = GL15C.glGenBuffers();
+                depthPbo = GL15C.glGenBuffers();
+                overlayPbo = GL15C.glGenBuffers();
+            }
+            if (bytes == n && width == w && height == h) {
+                return;
+            }
+
+            width = w;
+            height = h;
+            bytes = n;
+            allocate(worldPbo, n);
+            allocate(depthPbo, n);
+            allocate(overlayPbo, n);
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
         }
 
-        long now = System.nanoTime();
-        if (now - lastCaptureNs < MIN_CAPTURE_NS) {
+        private static void allocate(int pbo, int bytes) {
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, pbo);
+            GL15C.glBufferData(GL21C.GL_PIXEL_PACK_BUFFER, bytes, GL15C.GL_STREAM_READ);
+        }
+    }
+
+    /** Called after Minecraft/NeoForge finish the 3D world and immediately before the hand pass. */
+    public static void captureWorld() {
+        publishReady();
+
+        Minecraft minecraft = Minecraft.getInstance();
+        if (!SkyClient.linked() || minecraft.player == null || minecraft.level == null || current != null) {
             return;
         }
-        lastCaptureNs = now;
 
         RenderTarget target = minecraft.getMainRenderTarget();
         int width = target.width;
@@ -56,124 +91,217 @@ public final class FrameExporter {
             return;
         }
 
-        int bytes = Math.multiplyExact(Math.multiplyExact(width, height), 4);
-        ensureCapacity(bytes);
+        Capture capture = RING[ringNext];
+        if (capture == null) {
+            capture = RING[ringNext] = new Capture();
+        }
 
-        FrameLink.Write write = FrameLink.begin(width, height);
-        if (write == null) {
+        // Never wait for the GPU. If all three ring entries are still in flight, drop this visual
+        // frame and let gameplay/rendering continue.
+        if (capture.busy && !tryPublish(capture)) {
+            if (!loggedDrop) {
+                loggedDrop = true;
+                SkyCraft.LOG.info("SkyCraft: async framebuffer ring saturated; dropping visual frames instead of stalling gameplay");
+            }
             return;
         }
+
+        capture.ensure(width, height);
 
         try {
             target.bindRead();
             GL11C.glPixelStorei(GL11C.GL_PACK_ALIGNMENT, 1);
 
-            world.clear();
-            world.limit(bytes);
-            GL11C.glReadPixels(0, 0, width, height, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, world);
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, capture.worldPbo);
+            GL11C.glReadPixels(
+                0, 0, width, height,
+                GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, 0L
+            );
 
-            depth.clear();
-            depth.limit(bytes);
-            GL11C.glReadPixels(0, 0, width, height, GL11C.GL_DEPTH_COMPONENT, GL11C.GL_FLOAT, depth);
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, capture.depthPbo);
+            GL11C.glReadPixels(
+                0, 0, width, height,
+                GL11C.GL_DEPTH_COMPONENT, GL11C.GL_FLOAT, 0L
+            );
         } catch (Throwable t) {
-            write.abort();
-            SkyCraft.LOG.warn("SkyCraft: world/depth framebuffer readback failed", t);
+            SkyCraft.LOG.warn("SkyCraft: async world/depth readback queue failed", t);
             return;
         } finally {
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
             target.unbindRead();
         }
 
-        // The host supplies the sky/background. Turn pixels with untouched far-plane depth
-        // transparent, while every actual Minecraft surface stays opaque. The RGB remains the
-        // exact result Minecraft/Flywheel rendered.
-        world.order(ByteOrder.nativeOrder());
-        depth.order(ByteOrder.nativeOrder());
-        for (int p = 0, i = 0; i < bytes; p += 4, i += 4) {
-            float d = depth.getFloat(i);
-            world.put(p + 3, (byte) (d >= 0.999999F ? 0 : 0xFF));
-        }
-
-        world.position(0);
-        depth.position(0);
-        write.putWorld(world);
-        write.putDepth(depth);
-
         LocalPlayer player = minecraft.player;
-        var eye = player.getEyePosition();
-        pending = write;
-        pendingW = width;
-        pendingH = height;
-        pendingFar = Math.max(NEAR + 1.0F, minecraft.options.getEffectiveRenderDistance() * 16.0F * 4.0F);
-        pendingFov = minecraft.options.fov().get().floatValue();
-        pendingCamX = eye.x;
-        pendingCamY = eye.y;
-        pendingCamZ = eye.z;
-        pendingYaw = player.getYRot();
-        pendingPitch = player.getXRot();
+        Vec3Like eye = new Vec3Like(player.getEyePosition().x, player.getEyePosition().y, player.getEyePosition().z);
+        capture.far = Math.max(NEAR + 1.0F, minecraft.options.getEffectiveRenderDistance() * 16.0F * 4.0F);
+        capture.fov = minecraft.options.fov().get().floatValue();
+        capture.camX = eye.x;
+        capture.camY = eye.y;
+        capture.camZ = eye.z;
+        capture.yaw = player.getYRot();
+        capture.pitch = player.getXRot();
 
-        // Exactly the split used by the passthrough reference: after preserving world+depth,
-        // clear to transparent so the first-person hand, screen effects, HUD and GUI become
-        // their own screen-space layer. Clearing depth here is okay: vanilla does the same
-        // immediately before drawing the hand.
+        // Split the frame exactly like the passthrough reference: world/depth are already queued;
+        // everything rendered after this clear becomes the screen-space hand/HUD layer.
         target.setClearColor(0.0F, 0.0F, 0.0F, 0.0F);
         target.clear(Minecraft.ON_OSX);
         target.bindWrite(false);
+
+        current = capture;
     }
 
-    /** Called after the full GameRenderer/GUI frame. Publishes the overlay with its matching world/depth. */
+    /** Called immediately after GameRenderer.render and before Minecraft blits its own window. */
     public static void captureOverlay(Minecraft minecraft) {
-        FrameLink.Write write = pending;
-        if (write == null) {
+        Capture capture = current;
+        current = null;
+
+        if (capture == null) {
+            publishReady();
             return;
         }
 
         RenderTarget target = minecraft.getMainRenderTarget();
-        int bytes = pendingW * pendingH * 4;
-        if (target.width != pendingW || target.height != pendingH) {
-            pending = null;
-            write.abort();
+        if (target.width != capture.width || target.height != capture.height) {
             return;
         }
 
         try {
             target.bindRead();
             GL11C.glPixelStorei(GL11C.GL_PACK_ALIGNMENT, 1);
-            overlay.clear();
-            overlay.limit(bytes);
-            GL11C.glReadPixels(0, 0, pendingW, pendingH, GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, overlay);
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, capture.overlayPbo);
+            GL11C.glReadPixels(
+                0, 0, capture.width, capture.height,
+                GL11C.GL_RGBA, GL11C.GL_UNSIGNED_BYTE, 0L
+            );
         } catch (Throwable t) {
-            write.abort();
-            SkyCraft.LOG.warn("SkyCraft: hand/HUD framebuffer readback failed", t);
-            pending = null;
+            SkyCraft.LOG.warn("SkyCraft: async hand/HUD readback queue failed", t);
             return;
         } finally {
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
             target.unbindRead();
         }
 
-        // 1.21.1's main framebuffer can report the transparent clear as opaque black
-        // after the hand/GUI pass. Remove only near-black background pixels here so
-        // Skyrim remains visible under the hand/HUD. World colour/depth are separate,
-        // so this cannot erase actual Minecraft world geometry.
-        int cleared = repairOverlayAlpha(overlay, bytes);
-        overlay.position(0);
-        if (!logged) {
-            SkyCraft.LOG.info("SkyCraft: overlay alpha repair cleared {} of {} pixels",
-                cleared, pendingW * pendingH);
+        capture.fence = GL32C.glFenceSync(GL32C.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        capture.busy = true;
+        ringNext = (ringNext + 1) % RING_SIZE;
+
+        // Usually publishes a frame from 1-2 render frames ago.
+        publishReady();
+    }
+
+    private static void publishReady() {
+        for (Capture capture : RING) {
+            if (capture != null && capture.busy) {
+                tryPublish(capture);
+            }
+        }
+    }
+
+    private static boolean tryPublish(Capture capture) {
+        if (!capture.busy || capture.fence == 0L) {
+            return !capture.busy;
         }
 
-        write.finish(
-            overlay, pendingW, pendingH, NEAR, pendingFar, pendingFov,
-            pendingCamX, pendingCamY, pendingCamZ, pendingYaw, pendingPitch
-        );
-        pending = null;
+        int result = GL32C.glClientWaitSync(capture.fence, 0, 0L);
+        if (result != GL32C.GL_ALREADY_SIGNALED && result != GL32C.GL_CONDITION_SATISFIED) {
+            return false;
+        }
 
-        if (!logged) {
-            logged = true;
+        FrameLink.Write write = FrameLink.begin(capture.width, capture.height);
+        if (write == null) {
+            finishCapture(capture);
+            return true;
+        }
+
+        try {
+            ByteBuffer world = mapRead(capture.worldPbo, capture.bytes);
+            if (world == null) throw new IllegalStateException("world PBO map failed");
+            write.putWorld(world);
+            unmap();
+
+            ByteBuffer depth = mapRead(capture.depthPbo, capture.bytes);
+            if (depth == null) throw new IllegalStateException("depth PBO map failed");
+            write.putDepth(depth);
+            unmap();
+
+            ByteBuffer mappedOverlay = mapRead(capture.overlayPbo, capture.bytes);
+            if (mappedOverlay == null) throw new IllegalStateException("overlay PBO map failed");
+            ByteBuffer repaired = overlayScratch(capture.bytes);
+            repaired.clear();
+            repaired.limit(capture.bytes);
+            repaired.put(mappedOverlay.duplicate().position(0).limit(capture.bytes));
+            repaired.flip();
+            unmap();
+
+            int cleared = repairOverlayAlpha(repaired, capture.bytes);
+            repaired.position(0);
+            write.finish(
+                repaired,
+                capture.width, capture.height,
+                NEAR, capture.far, capture.fov,
+                capture.camX, capture.camY, capture.camZ,
+                capture.yaw, capture.pitch
+            );
+
+            if (!logged) {
+                logged = true;
+                SkyCraft.LOG.info(
+                    "SkyCraft: async three-layer passthrough active at {}x{}; overlay alpha repaired on {} pixels",
+                    capture.width, capture.height, cleared
+                );
+            }
+        } catch (Throwable t) {
+            try {
+                unmapIfMapped();
+            } catch (Throwable ignored) {
+            }
+            write.abort();
+            SkyCraft.LOG.warn("SkyCraft: async framebuffer publish failed", t);
+        } finally {
+            GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
+            finishCapture(capture);
+        }
+        return true;
+    }
+
+    private static ByteBuffer mapRead(int pbo, int bytes) {
+        GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, pbo);
+        return GL30C.glMapBufferRange(
+            GL21C.GL_PIXEL_PACK_BUFFER,
+            0L,
+            bytes,
+            GL30C.GL_MAP_READ_BIT
+        );
+    }
+
+    private static void unmap() {
+        GL15C.glUnmapBuffer(GL21C.GL_PIXEL_PACK_BUFFER);
+        GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
+    }
+
+    private static void unmapIfMapped() {
+        GL15C.glUnmapBuffer(GL21C.GL_PIXEL_PACK_BUFFER);
+        GL15C.glBindBuffer(GL21C.GL_PIXEL_PACK_BUFFER, 0);
+    }
+
+    private static void finishCapture(Capture capture) {
+        if (capture.fence != 0L) {
+            GL32C.glDeleteSync(capture.fence);
+            capture.fence = 0L;
+        }
+        capture.busy = false;
+    }
+
+    private static ByteBuffer overlayScratch(int bytes) {
+        if (overlayScratch == null || scratchBytes != bytes) {
+            overlayScratch = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
+            scratchBytes = bytes;
             SkyCraft.LOG.info(
-                "SkyCraft: three-layer framebuffer passthrough active ({}x{} world RGBA + depth + hand/HUD)",
-                pendingW, pendingH
+                "SkyCraft: async overlay staging buffer {} MiB",
+                String.format("%.1f", bytes / 1048576.0)
             );
         }
+        return overlayScratch;
     }
 
     private static int repairOverlayAlpha(ByteBuffer rgba, int bytes) {
@@ -190,17 +318,6 @@ public final class FrameExporter {
         return cleared;
     }
 
-    private static void ensureCapacity(int bytes) {
-        if (allocatedBytes == bytes && world != null) {
-            return;
-        }
-        world = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
-        depth = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
-        overlay = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder());
-        allocatedBytes = bytes;
-        SkyCraft.LOG.info(
-            "SkyCraft: allocated {:.1f} MiB three-layer framebuffer readback",
-            bytes * 3.0 / 1048576.0
-        );
-    }
+    /** Avoid retaining a Minecraft Vec3 object in the ring. */
+    private record Vec3Like(double x, double y, double z) {}
 }
