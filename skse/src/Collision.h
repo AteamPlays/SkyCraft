@@ -78,6 +78,7 @@ namespace skycraft
 			bool                 diggable{ false };
 			bool                 terrain{ false };
 			bool                 tree{ false };
+			bool                 playerIgnore{ false }; // props/clutter stay targetable but do not snag the MC player
 		};
 		struct Body
 		{
@@ -88,6 +89,7 @@ namespace skycraft
 			bool                    diggable{ false };
 			bool                    terrain{ false };
 			bool                    tree{ false };
+			bool                    playerIgnore{ false };
 			RE::TESObjectREFR*      ref{ nullptr };
 		};
 
