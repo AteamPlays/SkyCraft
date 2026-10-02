@@ -101,6 +101,7 @@ public final class SkyClient {
 
         applyViewportSize(minecraft);
         SkyWater.refresh();
+        ProxySync.frame(minecraft);
 
         if (SKY.menuOpen() || SKY.loading()) {
             InputBridge.releaseAll();
