@@ -180,7 +180,7 @@ public final class SkyDig {
 	 * with the drops and the sound of mining what it was made of.
 	 */
 	public static void open(ServerPlayer player, int world, BlockPos pos, int material) {
-		ServerLevel level = player.level();
+		ServerLevel level = player.serverLevel();
 		if (!destruction || !inReach(player, pos, REACH) || !level.isLoaded(pos) || player.isSpectator()) {
 			return;
 		}
@@ -208,7 +208,7 @@ public final class SkyDig {
 		if (!destruction) {
 			return;
 		}
-		ServerLevel level = player.level();
+		ServerLevel level = player.serverLevel();
 		for (int i = 0; i < cells.size() && i < materials.length; i++) {
 			BlockPos pos = cells.get(i);
 			if (inReach(player, pos, REACH + 4.0) && level.isLoaded(pos)) {
