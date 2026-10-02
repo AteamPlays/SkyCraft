@@ -100,6 +100,9 @@ public final class TriCollider {
 		double best = Double.NEGATIVE_INFINITY;
 		double limit = y + maxAbove;
 		for (SkyTri t : tris) {
+			if (t.playerIgnore) {
+				continue;
+			}
 			if (walkableOnly && !t.walkable) {
 				continue;
 			}
@@ -120,7 +123,7 @@ public final class TriCollider {
 	private static double ceilingAbove(List<SkyTri> tris, double x, double head, double z, double r) {
 		double best = Double.NaN;
 		for (SkyTri t : tris) {
-			if (t.stairHelper || t.maxY < head - 0.05) {
+			if (t.playerIgnore || t.stairHelper || t.maxY < head - 0.05) {
 				continue;
 			}
 			for (double[] s : FLOOR_SAMPLES) {
@@ -145,7 +148,7 @@ public final class TriCollider {
 		for (int iter = 0; iter < 4; iter++) {
 			double bestPen = 0, bestDx = 0, bestDz = 0;
 			for (SkyTri t : tris) {
-				if (t.stairHelper) {
+				if (t.playerIgnore || t.stairHelper) {
 					continue;
 				}
 				double lo = y + (t.walkable ? step : wallFrom);
