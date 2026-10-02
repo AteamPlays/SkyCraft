@@ -8,6 +8,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.IntegerProperty;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.EntityCollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
@@ -43,6 +44,14 @@ public final class SkyrimCollisionBlock extends Block {
 
     @Override
     protected VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        // Original SkyCraft deliberately excludes the local player from the coarse Skyrim
+        // voxel/proxy collider. The local player is resolved against exact streamed triangles
+        // in SkyCollider; applying both makes walls/corners sticky and causes double collision.
+        if (context instanceof EntityCollisionContext entityContext
+            && entityContext.getEntity() instanceof net.minecraft.client.player.LocalPlayer
+            && dev.skycraft.client.SkyClient.linked()) {
+            return Shapes.empty();
+        }
         return SHAPES[state.getValue(HEIGHT)];
     }
 
