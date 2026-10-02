@@ -172,6 +172,13 @@ namespace skycraft
 		void CaptureIfRequested(ID3D11DeviceContext* a_context, IDXGISwapChain* a_swapChain);
 	}
 
+	namespace Passthrough
+	{
+		// Present-time compositor for Minecraft's world colour/depth + hand/HUD frame mapping.
+		// Returns true when a complete passthrough frame was drawn.
+		bool Draw(ID3D11Device* a_device, ID3D11DeviceContext* a_context, IDXGISwapChain* a_swapChain);
+	}
+
 	namespace Overlay
 	{
 		void Install();
