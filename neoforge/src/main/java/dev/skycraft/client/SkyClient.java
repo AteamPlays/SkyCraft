@@ -4,6 +4,7 @@ import dev.skycraft.SkyCraft;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.mixin.OptionsAccessor;
+import dev.skycraft.mixin.MinecraftAccessor;
 import dev.skycraft.world.SkyrimCollisionMirror;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
