@@ -29,7 +29,8 @@
     "AbstractArrowMixin",
     "ItemMixin",
     "MinecraftServerFlightMixin",
-    "BlockStateBaseMixin"
+    "BlockStateBaseMixin",
+    "SmithingMixin"
   ],
   "injectors": {
     "defaultRequire": 1
