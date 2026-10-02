@@ -34,6 +34,6 @@ public final class SkyCraft {
     }
 
     private static void onRenderFrame(RenderFrameEvent.Post event) {
-        FrameExporter.capture(net.minecraft.client.Minecraft.getInstance());
+        FrameExporter.captureOverlay(net.minecraft.client.Minecraft.getInstance());
     }
 }
