@@ -47,24 +47,35 @@ function Get-FileVersionText([string]$Path) {
 }
 
 $game = Find-Skyrim $SkyrimDir
+$skyrimExe = Join-Path $game "SkyrimSE.exe"
 $skse = Join-Path $game "skse64_loader.exe"
-if (-not (Test-Path $skse)) {
-    throw "SKSE64 is not installed next to SkyrimSE.exe in: $game"
-}
-
 $plugins = Join-Path $game "Data\SKSE\Plugins"
 $addressLibrary = Get-ChildItem $plugins -Filter "versionlib-*.bin" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $addressLibrary) {
-    throw "Address Library for SKSE Plugins (Anniversary Edition) was not detected in Data\SKSE\Plugins."
-}
+
+$skseInstalled = Test-Path $skse
+$addressInstalled = $null -ne $addressLibrary
 
 Write-Host ""
 Write-Host "SkyCraft real-Skyrim environment"
 Write-Host "  Skyrim:          $game"
-Write-Host "  Skyrim runtime:  $(Get-FileVersionText (Join-Path $game \"SkyrimSE.exe\"))"
-Write-Host "  SKSE loader:     $(Get-FileVersionText $skse)"
-Write-Host "  Address Library: $($addressLibrary.Name)"
+Write-Host "  Skyrim runtime:  $(Get-FileVersionText $skyrimExe)"
+Write-Host "  SKSE loader:     $(if ($skseInstalled) { Get-FileVersionText $skse } else { 'MISSING' })"
+Write-Host "  Address Library: $(if ($addressInstalled) { $addressLibrary.Name } else { 'MISSING' })"
 Write-Host ""
+
+if (-not $skseInstalled -or -not $addressInstalled) {
+    Write-Host "Missing prerequisites:"
+    if (-not $skseInstalled) {
+        Write-Host "  - SKSE64 matching the Skyrim runtime above"
+    }
+    if (-not $addressInstalled) {
+        Write-Host "  - Address Library for SKSE Plugins"
+    }
+    if ($CheckOnly) {
+        exit 2
+    }
+    throw "Install the missing Skyrim prerequisites, then run the check again."
+}
 
 if ($CheckOnly) {
     Write-Host "Environment check passed."
