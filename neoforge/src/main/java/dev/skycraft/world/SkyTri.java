@@ -16,6 +16,8 @@ public final class SkyTri {
 	public final int material;
 	/** Skyrim's land (terrain), not an object on it. */
 	public final boolean terrain;
+	/** Skyrim prop/clutter collision that should remain targetable but not block the MC player. */
+	public final boolean playerIgnore;
 
 	public SkyTri(float[] v, int o, boolean stairHelper) {
 		this(v, o, stairHelper ? dev.skycraft.link.Proto.TRI_STAIR_HELPER : 0);
@@ -27,6 +29,7 @@ public final class SkyTri {
 		this.diggable = (flags & dev.skycraft.link.Proto.TRI_DIGGABLE) != 0;
 		this.material = (flags >>> dev.skycraft.link.Proto.TRI_MATERIAL_SHIFT) & 0xFF;
 		this.terrain = (flags & dev.skycraft.link.Proto.TRI_TERRAIN) != 0;
+		this.playerIgnore = (flags & dev.skycraft.link.Proto.TRI_PLAYER_IGNORE) != 0;
 		this.ax = v[o];
 		this.ay = v[o + 1];
 		this.az = v[o + 2];
