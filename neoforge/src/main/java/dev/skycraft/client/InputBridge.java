@@ -139,6 +139,16 @@ public final class InputBridge {
         return hid >= 0 && hid < DOWN.length && DOWN[hid];
     }
 
+    /** Used by InputConstantsMixin when vanilla polls GLFW keyboard state directly. */
+    public static boolean isGlfwKeyDown(int glfwKey) {
+        for (int hid = 1; hid < DOWN.length; hid++) {
+            if (DOWN[hid] && hidToGlfw(hid) == glfwKey) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** USB HID keyboard usage / SDL scancode -> GLFW key symbol. */
     private static int hidToGlfw(int h) {
         if (h >= 4 && h <= 29) return GLFW.GLFW_KEY_A + (h - 4);
