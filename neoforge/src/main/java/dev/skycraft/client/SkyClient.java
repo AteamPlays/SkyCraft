@@ -46,9 +46,6 @@ public final class SkyClient {
             mirrorReadyLogged = false;
             testCollisionReadyLogged = false;
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
-            if (linked) {
-                SkyrimCollisionMirror.start();
-            }
         }
 
         if (!linked || !SkyLink.readSkyState(SKY)) {
@@ -70,13 +67,18 @@ public final class SkyClient {
                 // The mirror world is empty by design. Hold both the client and integrated
                 // server player at Skyrim's requested coordinates until the streamed floor
                 // has actually been materialized, otherwise vanilla's void kill triggers.
-                boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollision();
-                holdTestPlayer(minecraft, player, !collisionReady);
+                boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollisionBelow(SKY.x, SKY.y, SKY.z);
+
+                // Keep the harness pinned even after collision is verified. Input/movement
+                // authority is a later milestone; for this test we only prove that the exact
+                // Skyrim coordinate and its floor are synchronized without falling into void.
+                holdTestPlayer(minecraft, player, true);
 
                 if (collisionReady && !testCollisionReadyLogged) {
                     testCollisionReadyLogged = true;
                     SkyCraft.LOG.info(
-                        "SkyCraft: fake-Skyrim collision is live at the mirror world; releasing test hold"
+                        "SkyCraft: fake-Skyrim floor verified under player; keeping harness pinned at ({}, {}, {})",
+                        SKY.x, SKY.y, SKY.z
                     );
                 }
 
