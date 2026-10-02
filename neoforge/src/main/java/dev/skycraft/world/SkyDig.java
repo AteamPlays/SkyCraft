@@ -200,7 +200,7 @@ public final class SkyDig {
 				state.getBlock().playerDestroy(level, player, pos, state, null, used);
 			}
 		}
-		level.levelEvent(LevelEvent.PARTICLES_AND_SOUND_DESTROY_BLOCK, pos, Block.getId(state));
+		level.levelEvent(LevelEvent.PARTICLES_DESTROY_BLOCK, pos, Block.getId(state));
 	}
 
 	/** Cells around a mined one that are wholly inside Skyrim's geometry: blocks now. */
