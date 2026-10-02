@@ -19,11 +19,4 @@ public abstract class MinecraftServerFlightMixin {
             cir.setReturnValue(true);
         }
     }
-
-    @Inject(method = "allowFlight", at = @At("HEAD"), cancellable = true, require = 0)
-    private void skycraft$allowSkyrimFlightLegacy(CallbackInfoReturnable<Boolean> cir) {
-        if (SkyLink.active()) {
-            cir.setReturnValue(true);
-        }
-    }
 }
