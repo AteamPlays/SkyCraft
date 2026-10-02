@@ -18,6 +18,17 @@ repositories {
     mavenCentral()
     maven { url = 'https://maven.createmod.net' } // Create, Ponder, Flywheel
     maven { url = 'https://maven.ithundxr.dev/snapshots' } // Registrate
+    maven { url = 'https://maven.ryanhcode.dev/releases' } // Sable / Simulated project
+    maven { url = 'https://maven.ryanhcode.dev/snapshots' }
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        filter { includeGroup 'maven.modrinth' }
+    }
 }
 
 neoForge {
@@ -57,6 +68,19 @@ dependencies {
     compileOnly("dev.engine-room.flywheel:flywheel-neoforge-api-${minecraft_version}:${flywheel_version}")
     runtimeOnly("dev.engine-room.flywheel:flywheel-neoforge-${minecraft_version}:${flywheel_version}")
     implementation("com.tterrag.registrate:Registrate:${registrate_version}")
+
+    // Create: Aeronautics 1.3.2 compatibility runtime. Sable is on the compile classpath so
+    // SkyCraft can grow direct physics integration while the released Aeronautics bundle is
+    // supplied to the dev run automatically.
+    implementation("foundry.veil:veil-neoforge-${minecraft_version}:${veil_version}") {
+        exclude group: "maven.modrinth"
+        exclude group: "com.tterrag.registrate"
+    }
+    implementation("dev.ryanhcode.sable:sable-neoforge-${minecraft_version}:${sable_version}") {
+        exclude group: "foundry.veil"
+        exclude group: "com.tterrag.registrate"
+    }
+    runtimeOnly("maven.modrinth:oWaK0Q19:${aeronautics_modrinth_version}")
 
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
