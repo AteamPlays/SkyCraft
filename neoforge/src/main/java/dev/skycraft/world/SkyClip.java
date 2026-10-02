@@ -48,8 +48,32 @@ public final class SkyClip {
 			return vanilla;
 		}
 		Direction face = Direction.values()[SkyRay.dominantFace(hit.nx(), hit.ny(), hit.nz())];
-		int[] cell = use == Use.PICK ? SkyRay.placementCell(hit) : SkyRay.surfaceCell(hit);
-		return new SkyrimHitResult(location, face, new BlockPos(cell[0], cell[1], cell[2]), hit);
+		BlockPos pos;
+		if (use == Use.PICK) {
+			pos = clearPlacementCell(hit, face);
+		} else {
+			int[] cell = SkyRay.surfaceCell(hit);
+			pos = new BlockPos(cell[0], cell[1], cell[2]);
+		}
+		return new SkyrimHitResult(location, face, pos, hit);
+	}
+
+	private static BlockPos clearPlacementCell(SkyRay.Hit hit, Direction face) {
+		// Start just outside the exact Skyrim surface. If that Minecraft cell still contains a
+		// meaningful amount of Skyrim collision, walk outward along the contacted face. Full
+		// blocks therefore never spawn embedded in floors/walls, avoiding depth fighting and
+		// the "half underground" placement feel.
+		double eps = 0.02;
+		BlockPos pos = BlockPos.containing(
+			hit.x() + hit.nx() * eps,
+			hit.y() + hit.ny() * eps,
+			hit.z() + hit.nz() * eps
+		);
+
+		for (int i = 0; i < 3 && SkyCollision.solidFraction(pos) > 0.015F; i++) {
+			pos = pos.relative(face);
+		}
+		return pos;
 	}
 
 	private static final SkyTri STONE_WALL = new SkyTri(new float[9], 0, dev.skycraft.link.Proto.TRI_DIGGABLE | (dev.skycraft.link.Proto.DIG_STONE << dev.skycraft.link.Proto.TRI_MATERIAL_SHIFT));
