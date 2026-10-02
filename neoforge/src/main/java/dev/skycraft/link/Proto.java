@@ -226,6 +226,7 @@ public final class Proto {
 	public static final int TRI_DIGGABLE = 2;
 	public static final int TRI_GHOST = 4;
 	public static final int TRI_TERRAIN = 8;
+	public static final int TRI_PLAYER_IGNORE = 16;
 	public static final int TRI_MATERIAL_SHIFT = 8;
 	// DigMaterial (skycraft_protocol.h)
 	public static final int DIG_NONE = 0, DIG_GRASS = 1, DIG_DIRT = 2, DIG_STONE = 3, DIG_COBBLE = 4, DIG_SNOW = 5, DIG_ICE = 6, DIG_SAND = 7,
