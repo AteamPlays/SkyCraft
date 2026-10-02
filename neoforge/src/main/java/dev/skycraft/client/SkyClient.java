@@ -11,11 +11,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 
 /**
- * Safe player-state bridge for the 1.21.1 backport.
+ * Per-frame/tick glue between Minecraft 1.21.1 and Skyrim.
  *
- * Normal development keeps Skyrim authoritative until the collision/player-control
- * port is complete. The fake-Skyrim harness opts into a controlled test mode so
- * we can prove spawn, collision and the handshake without launching the real game.
+ * Frame work (shared state, input, look, interpolation) runs from Minecraft.runTick so it tracks
+ * the render frame instead of the 20 Hz client tick. Physics/world synchronization remains on
+ * ClientTick.Post.
  */
 public final class SkyClient {
     private static final boolean TEST_MODE = Boolean.getBoolean("skycraft.testMode");
@@ -30,6 +30,9 @@ public final class SkyClient {
     private static int appliedViewportW;
     private static int appliedViewportH;
     private static long frameCounter;
+    private static long qpcFreq;
+    private static int lastPacedSeq;
+    private static boolean skyrimStalled;
 
     private SkyClient() {}
 
@@ -41,7 +44,8 @@ public final class SkyClient {
         return SKY;
     }
 
-    public static void clientTick() {
+    /** Start of every rendered Minecraft frame. */
+    public static void beginFrame() {
         SkyLink.poll();
         boolean nowLinked = SkyLink.active();
 
@@ -51,13 +55,16 @@ public final class SkyClient {
             testCollisionReadyLogged = false;
             realCollisionReadyLogged = false;
             RenderProbe.reset();
+
             if (!linked) {
                 InputBridge.releaseAll();
-            }
-            if (linked) {
+            } else {
                 Minecraft minecraft = Minecraft.getInstance();
                 ((OptionsAccessor) (Object) minecraft.options).skycraft$setPauseOnLostFocus(false);
-                SkyCraft.LOG.info("SkyCraft: background focus mode enabled; Minecraft will not pause when Skyrim has focus");
+                minecraft.options.enableVsync().set(false);
+                minecraft.options.framerateLimit().set(260);
+                minecraft.options.autoJump().set(false);
+                SkyCraft.LOG.info("SkyCraft: frame-synchronous background mode enabled");
             }
             SkyCraft.LOG.info("SkyCraft: Skyrim link {}", linked ? "up" : "down");
         }
@@ -75,121 +82,176 @@ public final class SkyClient {
             InputBridge.drain(minecraft);
         }
 
+        // Skyrim owns camera direction. Apply it every render frame instead of every client tick.
+        LocalPlayer player = minecraft.player;
+        if (player != null && minecraft.screen == null && SKY.inGame() && !SKY.loading()) {
+            player.setYRot(SKY.yaw);
+            player.setXRot(SKY.pitch);
+            player.yRotO = SKY.yaw;
+            player.xRotO = SKY.pitch;
+        }
+    }
+
+    /** End of ClientTick.Post: world/physics synchronization. */
+    public static void clientTick() {
+        if (!linked) {
+            return;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
         MirrorWorld.tick(minecraft, SKY);
         if (MirrorWorld.isReady(minecraft)) {
             SkyrimCollisionMirror.flushToMirrorWorld(minecraft);
         }
 
         LocalPlayer player = minecraft.player;
-        MC.flags = 0;
-        MC.frameCounter = ++frameCounter;
+        if (player == null || !MirrorWorld.isReady(minecraft)) {
+            return;
+        }
 
-        if (player != null && MirrorWorld.isReady(minecraft)) {
-            boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollisionBelow(SKY.x, SKY.y, SKY.z);
+        boolean collisionReady = SkyrimCollisionMirror.hasAppliedCollisionBelow(SKY.x, SKY.y, SKY.z);
 
-            if (TEST_MODE) {
-                // Keep the fake harness pinned forever. It proves the shared-memory/collision
-                // handshake without introducing movement authority into that deterministic test.
-                syncPlayerToSkyrim(minecraft, player, true);
-
-                if (collisionReady && !testCollisionReadyLogged) {
-                    testCollisionReadyLogged = true;
-                    SkyCraft.LOG.info(
-                        "SkyCraft: fake-Skyrim floor verified under player; keeping harness pinned at ({}, {}, {})",
-                        SKY.x, SKY.y, SKY.z
-                    );
-                }
-
+        if (TEST_MODE) {
+            syncPlayerToSkyrim(minecraft, player, true);
+            if (collisionReady && !testCollisionReadyLogged) {
+                testCollisionReadyLogged = true;
+                SkyCraft.LOG.info(
+                    "SkyCraft: fake-Skyrim floor verified under player; keeping harness pinned at ({}, {}, {})",
+                    SKY.x, SKY.y, SKY.z
+                );
+            }
+            if (collisionReady) {
+                MC.flags |= Proto.MC_IN_WORLD;
+                MC.teleportAck = SKY.teleportSeq;
+            }
+        } else {
+            boolean awaitingTeleport = MC.teleportAck != SKY.teleportSeq;
+            if (awaitingTeleport) {
+                syncPlayerToSkyrim(minecraft, player, !collisionReady);
                 if (collisionReady) {
-                    MC.flags |= Proto.MC_IN_WORLD;
+                    // Final snap with gravity restored, then acknowledge only after collision exists.
+                    syncPlayerToSkyrim(minecraft, player, false);
                     MC.teleportAck = SKY.teleportSeq;
-                }
-            } else {
-                // A real Skyrim run starts from whatever position/noGravity state the persistent
-                // mirror save last had (the fake harness deliberately leaves noGravity enabled).
-                // Whenever Skyrim requests a teleport, pin Minecraft at Skyrim's live position
-                // until the streamed proxy floor is actually present. Then perform one final snap,
-                // restore gravity, acknowledge the teleport, and let vanilla/exact collision take over.
-                boolean awaitingTeleport = MC.teleportAck != SKY.teleportSeq;
-
-                if (awaitingTeleport) {
-                    syncPlayerToSkyrim(minecraft, player, !collisionReady);
-
-                    if (collisionReady) {
-                        MC.teleportAck = SKY.teleportSeq;
-                        MC.flags |= Proto.MC_IN_WORLD;
-
-                        if (!realCollisionReadyLogged) {
-                            realCollisionReadyLogged = true;
-                            SkyCraft.LOG.info(
-                                "SkyCraft: real-Skyrim floor verified; player released at ({}, {}, {}), teleportAck={}",
-                                SKY.x, SKY.y, SKY.z, SKY.teleportSeq
-                            );
-                            if (Boolean.getBoolean("skycraft.renderProbe")) {
-                                RenderProbe.send(player);
-                            }
+                    if (!realCollisionReadyLogged) {
+                        realCollisionReadyLogged = true;
+                        SkyCraft.LOG.info(
+                            "SkyCraft: real-Skyrim floor verified; player released at ({}, {}, {}), teleportAck={}",
+                            SKY.x, SKY.y, SKY.z, SKY.teleportSeq
+                        );
+                        if (Boolean.getBoolean("skycraft.renderProbe")) {
+                            RenderProbe.send(player);
                         }
                     }
-                } else {
-                    // Keep advertising authority after the initial handshake. Also clear any
-                    // stale noGravity bit left in the integrated-player save by an older test.
-                    MC.flags |= Proto.MC_IN_WORLD;
-                    releaseStaleNoGravity(minecraft, player);
                 }
+            } else {
+                releaseStaleNoGravity(minecraft, player);
             }
+        }
 
-            if (minecraft.screen == null && SKY.inGame() && !SKY.loading()) {
-                player.setYRot(SKY.yaw);
-                player.setXRot(SKY.pitch);
-                player.yRotO = SKY.yaw;
-                player.xRotO = SKY.pitch;
-            }
+        // Physics tick snapshot used by Skyrim for interpolation between Minecraft's 20 Hz ticks.
+        if (qpcFreq == 0) {
+            qpcFreq = SkyLink.qpcFrequency();
+        }
+        float tickMs = minecraft.level != null
+            ? minecraft.level.tickRateManager().millisecondsPerTick()
+            : 50.0F;
+        float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+        MC.tickQpc = SkyLink.qpc() - (long) (partial * tickMs * qpcFreq / 1000.0);
+        MC.tickMs = tickMs;
+        MC.prevX = player.xo;
+        MC.prevY = player.yo;
+        MC.prevZ = player.zo;
+        MC.curX = player.getX();
+        MC.curY = player.getY();
+        MC.curZ = player.getZ();
+        MC.eyeHeightO = player.getEyeHeight();
+        MC.eyeHeightT = player.getEyeHeight();
 
-            Vec3 eye = player.getEyePosition();
-            MC.x = player.getX();
-            MC.y = player.getY();
-            MC.z = player.getZ();
+        if (!mirrorReadyLogged) {
+            mirrorReadyLogged = true;
+            SkyCraft.LOG.info(
+                TEST_MODE
+                    ? "SkyCraft: NeoForge mirror world ready in fake-Skyrim test mode"
+                    : "SkyCraft: NeoForge mirror world ready; using frame-synchronous bridge"
+            );
+        }
+    }
+
+    /** Immediately after GameRenderer.render and before Minecraft blits its hidden window. */
+    public static void afterRender() {
+        if (!linked) {
+            return;
+        }
+
+        Minecraft minecraft = Minecraft.getInstance();
+        LocalPlayer player = minecraft.player;
+        int flags = 0;
+
+        if (player != null && minecraft.level != null && MirrorWorld.isReady(minecraft)) {
+            float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+            double x = player.xo + (player.getX() - player.xo) * partial;
+            double y = player.yo + (player.getY() - player.yo) * partial;
+            double z = player.zo + (player.getZ() - player.zo) * partial;
+            Vec3 eye = player.getEyePosition(partial);
+
+            flags |= Proto.MC_IN_WORLD;
+            if (player.onGround()) flags |= Proto.MC_ON_GROUND;
+            if (player.isShiftKeyDown()) flags |= Proto.MC_SNEAKING;
+            if (player.isSprinting()) flags |= Proto.MC_SPRINTING;
+            if (player.isDeadOrDying()) flags |= Proto.MC_DEAD;
+            if (player.isSwimming()) flags |= Proto.MC_SWIMMING;
+            if (player.getAbilities().flying) flags |= Proto.MC_FLYING;
+
+            MC.x = x;
+            MC.y = y;
+            MC.z = z;
             MC.yaw = player.getYRot();
             MC.pitch = player.getXRot();
-            MC.eyeHeight = player.getEyeHeight();
+            MC.eyeHeight = (float) (eye.y - y);
             MC.eyeX = eye.x;
             MC.eyeY = eye.y;
             MC.eyeZ = eye.z;
             MC.sensitivity = minecraft.options.sensitivity().get().floatValue();
             MC.guiScale = (int) minecraft.getWindow().getGuiScale();
             MC.fov = minecraft.options.fov().get().floatValue();
-            MC.tickQpc = SkyLink.qpc();
-            MC.prevX = player.xo;
-            MC.prevY = player.yo;
-            MC.prevZ = player.zo;
-            MC.curX = player.getX();
-            MC.curY = player.getY();
-            MC.curZ = player.getZ();
-            MC.eyeHeightO = MC.eyeHeight;
-            MC.eyeHeightT = MC.eyeHeight;
-            MC.tickMs = 50.0F;
             MC.cameraMode = minecraft.options.getCameraType().ordinal();
             MC.cameraDistance = 0.0F;
+        }
 
-            if (minecraft.screen != null) MC.flags |= Proto.MC_SCREEN_OPEN;
-            if (player.onGround()) MC.flags |= Proto.MC_ON_GROUND;
-            if (player.isShiftKeyDown()) MC.flags |= Proto.MC_SNEAKING;
-            if (player.isSprinting()) MC.flags |= Proto.MC_SPRINTING;
-            if (player.isDeadOrDying()) MC.flags |= Proto.MC_DEAD;
-            if (player.isSwimming()) MC.flags |= Proto.MC_SWIMMING;
-            if (player.getAbilities().flying) MC.flags |= Proto.MC_FLYING;
+        if (minecraft.screen != null) {
+            flags |= Proto.MC_SCREEN_OPEN;
+        }
 
-            if (!mirrorReadyLogged) {
-                mirrorReadyLogged = true;
-                SkyCraft.LOG.info(
-                    TEST_MODE
-                        ? "SkyCraft: NeoForge mirror world ready in fake-Skyrim test mode"
-                        : "SkyCraft: NeoForge mirror world ready; waiting for real Skyrim floor sync"
-                );
+        MC.flags = flags;
+        MC.frameCounter = ++frameCounter;
+        SkyLink.writeMcState(MC);
+    }
+
+    /**
+     * Match original SkyCraft's cadence: don't free-run hundreds of Minecraft frames ahead of
+     * Skyrim. Wait briefly for the next Skyrim state frame, but stop blocking if Skyrim stalls.
+     */
+    public static void paceFrame() {
+        if (!linked) {
+            return;
+        }
+        int seq = SkyLink.skyStateSeq() >>> 1;
+        if (skyrimStalled && seq == lastPacedSeq) {
+            return;
+        }
+
+        skyrimStalled = false;
+        long deadline = System.nanoTime() + 25_000_000L;
+        while ((SkyLink.skyStateSeq() >>> 1) == seq && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+            if (deadline - System.nanoTime() > 2_000_000L) {
+                Thread.yield();
             }
         }
 
-        SkyLink.writeMcState(MC);
+        int now = SkyLink.skyStateSeq() >>> 1;
+        skyrimStalled = now == seq;
+        lastPacedSeq = now;
     }
 
     private static void applyViewportSize(Minecraft minecraft) {
@@ -206,7 +268,6 @@ public final class SkyClient {
     }
 
     private static void syncPlayerToSkyrim(Minecraft minecraft, LocalPlayer player, boolean holdGravity) {
-        // Snap client-side immediately so the camera never spends a frame at a stale saved position.
         player.setDeltaMovement(Vec3.ZERO);
         player.setPos(SKY.x, SKY.y, SKY.z);
         player.xo = SKY.x;
@@ -230,7 +291,6 @@ public final class SkyClient {
             if (serverPlayer == null) {
                 return;
             }
-
             serverPlayer.setNoGravity(holdGravity);
             serverPlayer.setDeltaMovement(Vec3.ZERO);
             serverPlayer.teleportTo(x, y, z);
