@@ -3,7 +3,8 @@
   "package": "dev.skycraft.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
-    "EntityCollideMixin"
+    "EntityCollideMixin",
+    "LevelRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
