@@ -49,6 +49,9 @@ public final class SkyClient {
             testCollisionReadyLogged = false;
             realCollisionReadyLogged = false;
             RenderProbe.reset();
+            if (!linked) {
+                InputBridge.releaseAll();
+            }
             if (linked) {
                 Minecraft minecraft = Minecraft.getInstance();
                 ((OptionsAccessor) (Object) minecraft.options).skycraft$setPauseOnLostFocus(false);
@@ -62,6 +65,13 @@ public final class SkyClient {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
+
+        if (SKY.menuOpen() || SKY.loading()) {
+            InputBridge.releaseAll();
+        } else {
+            InputBridge.drain(minecraft);
+        }
+
         MirrorWorld.tick(minecraft, SKY);
         if (MirrorWorld.isReady(minecraft)) {
             SkyrimCollisionMirror.flushToMirrorWorld(minecraft);
@@ -157,6 +167,14 @@ public final class SkyClient {
             MC.tickMs = 50.0F;
             MC.cameraMode = minecraft.options.getCameraType().ordinal();
             MC.cameraDistance = 0.0F;
+
+            if (minecraft.screen != null) MC.flags |= Proto.MC_SCREEN_OPEN;
+            if (player.onGround()) MC.flags |= Proto.MC_ON_GROUND;
+            if (player.isShiftKeyDown()) MC.flags |= Proto.MC_SNEAKING;
+            if (player.isSprinting()) MC.flags |= Proto.MC_SPRINTING;
+            if (player.isDeadOrDying()) MC.flags |= Proto.MC_DEAD;
+            if (player.isSwimming()) MC.flags |= Proto.MC_SWIMMING;
+            if (player.getAbilities().flying) MC.flags |= Proto.MC_FLYING;
 
             if (!mirrorReadyLogged) {
                 mirrorReadyLogged = true;
