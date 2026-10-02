@@ -28,7 +28,8 @@
     "ServerPlayerMixin",
     "AbstractArrowMixin",
     "ItemMixin",
-    "MinecraftServerFlightMixin"
+    "MinecraftServerFlightMixin",
+    "BlockStateBaseMixin"
   ],
   "injectors": {
     "defaultRequire": 1
