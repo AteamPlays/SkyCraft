@@ -9,7 +9,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.ServerExplosion;
+import net.minecraft.world.level.Explosion;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -43,12 +43,14 @@ public final class SkyDigBlast {
 	}
 
 	/** For an explosion about to go off: null unless Skyrim's geometry around it is known. */
-	public static SkyDigBlast begin(ServerExplosion explosion) {
+	public static SkyDigBlast begin(Explosion explosion, ServerLevel level) {
 		Vec3 c = explosion.center();
-		if (!SkyDig.destruction || !SkyCollision.active() || !SkyCollision.isKnown((int) Math.floor(c.x), (int) Math.floor(c.y), (int) Math.floor(c.z)) || !SkyLink.readSkyState(SKY)) {
+		if (!SkyDig.destruction || !SkyCollision.active()
+			|| !SkyCollision.isKnown((int)Math.floor(c.x), (int)Math.floor(c.y), (int)Math.floor(c.z))
+			|| !SkyLink.readSkyState(SKY)) {
 			return null;
 		}
-		return new SkyDigBlast(explosion.level(), SKY.worldId, c, explosion.radius());
+		return new SkyDigBlast(level, SKY.worldId, c, explosion.radius());
 	}
 
 	/**
