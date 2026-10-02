@@ -68,6 +68,14 @@ public final class FrameExporter {
         pixels.limit(bytes);
         pixels.get(copy, 0, bytes);
 
+        // Minecraft 1.21.1's main OpenGL target does not preserve the transparent
+        // background the same way as the newer renderer used by original SkyCraft.
+        // With the level renderer suppressed, untouched pixels arrive as opaque black.
+        // Remove only exact/near-exact black here so Skyrim remains visible underneath.
+        // This is a compatibility bridge; later we can move hand/HUD rendering to its
+        // own transparent target for perfect dark-pixel preservation.
+        repairOverlayAlpha(copy, bytes);
+
         Pointer shm = SkyLink.segment();
         if (shm == null) {
             return;
@@ -82,6 +90,18 @@ public final class FrameExporter {
                 "SkyCraft: NeoForge hand/HUD overlay capture active ({}x{}, synchronous RGBA readback)",
                 width, height
             );
+        }
+    }
+
+    private static void repairOverlayAlpha(byte[] rgba, int bytes) {
+        for (int i = 0; i < bytes; i += 4) {
+            int r = rgba[i] & 0xFF;
+            int g = rgba[i + 1] & 0xFF;
+            int b = rgba[i + 2] & 0xFF;
+            // Keep non-black hand/HUD pixels exactly as Minecraft rendered them.
+            if (r <= 1 && g <= 1 && b <= 1) {
+                rgba[i + 3] = 0;
+            }
         }
     }
 
