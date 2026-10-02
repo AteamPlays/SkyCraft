@@ -11,7 +11,8 @@
     "InputConstantsMixin",
     "MinecraftMixin",
     "ScreenMixin",
-    "MinecraftAccessor"
+    "MinecraftAccessor",
+    "BlockCollisionsMixin"
   ],
   "injectors": {
     "defaultRequire": 1
