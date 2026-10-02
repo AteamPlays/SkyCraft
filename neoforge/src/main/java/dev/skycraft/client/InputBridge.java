@@ -1,24 +1,24 @@
 package dev.skycraft.client;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import dev.skycraft.SkyCraft;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
-import net.minecraft.client.KeyMapping;
+import dev.skycraft.mixin.KeyboardHandlerInvoker;
+import dev.skycraft.mixin.MouseHandlerInvoker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Minecraft 1.21.1 input bridge.
+ * Skyrim -> Minecraft 1.21.1 input bridge.
  *
- * Skyrim's SKSE side sends USB-HID/SDL scancodes through the shared input ring.
- * 1.21.1 still uses GLFW, so translate those HID usages into GLFW key symbols and
- * drive vanilla KeyMapping state directly. That is enough for movement, jump,
- * sprint/sneak, attack/use, hotbar keys and mod keybinds while Skyrim owns focus.
+ * Skyrim sends SDL/USB-style scan codes through the shared ring. Convert them to GLFW keys,
+ * then feed Minecraft's real KeyboardHandler/MouseHandler callbacks. That preserves vanilla
+ * inventory/chat/GUI behavior and also lets mod keybinds see the same input path as a real window.
  */
 public final class InputBridge {
     private static final boolean[] DOWN = new boolean[512];
+    private static final boolean[] MOUSE_DOWN = new boolean[8];
     private static boolean logged;
 
     private InputBridge() {}
@@ -26,59 +26,74 @@ public final class InputBridge {
     public static void drain(Minecraft minecraft) {
         SkyLink.drainInput((type, code, a, b, c) -> {
             switch (type) {
-                case Proto.IN_KEY -> setKey(code, a != 0);
-                case Proto.IN_MOUSE_BUTTON -> setMouse(code, a != 0);
+                case Proto.IN_KEY -> key(minecraft, code, a != 0);
+                case Proto.IN_MOUSE_BUTTON -> mouseButton(minecraft, code, a != 0);
                 case Proto.IN_SCROLL -> scroll(minecraft, a);
-                case Proto.IN_RELEASE_ALL -> releaseAll();
+                case Proto.IN_CURSOR -> moveCursor(minecraft, a, b);
+                case Proto.IN_TEXT -> text(minecraft, a);
+                case Proto.IN_RELEASE_ALL -> releaseAll(minecraft);
                 case Proto.IN_OPEN_MENU -> {
-                    releaseAll();
+                    releaseAll(minecraft);
                     if (minecraft.screen == null) {
                         minecraft.setScreen(new PauseScreen(true));
                     }
                 }
                 default -> {
-                    // Cursor/text/hurt are later parts of the complete original bridge.
                 }
             }
         });
 
         if (!logged) {
             logged = true;
-            SkyCraft.LOG.info("SkyCraft: Skyrim -> Minecraft KeyMapping input bridge active");
+            SkyCraft.LOG.info("SkyCraft: Skyrim -> Minecraft vanilla input replay active");
         }
     }
 
     public static void releaseAll() {
+        releaseAll(Minecraft.getInstance());
+    }
+
+    public static void releaseAll(Minecraft minecraft) {
+        if (minecraft == null) return;
         for (int hid = 0; hid < DOWN.length; hid++) {
             if (DOWN[hid]) {
                 DOWN[hid] = false;
-                int glfw = hidToGlfw(hid);
-                if (glfw != GLFW.GLFW_KEY_UNKNOWN) {
-                    KeyMapping.set(InputConstants.Type.KEYSYM.getOrCreate(glfw), false);
-                }
+                sendKey(minecraft, hid, false);
             }
         }
-
-        for (int button = 0; button <= GLFW.GLFW_MOUSE_BUTTON_8; button++) {
-            KeyMapping.set(InputConstants.Type.MOUSE.getOrCreate(button), false);
+        for (int i = 0; i < MOUSE_DOWN.length; i++) {
+            if (MOUSE_DOWN[i]) {
+                MOUSE_DOWN[i] = false;
+                sendMouse(minecraft, i, false);
+            }
         }
     }
 
-    private static void setKey(int hid, boolean down) {
+    private static void key(Minecraft minecraft, int hid, boolean down) {
         if (hid <= 0 || hid >= DOWN.length) return;
+        if (DOWN[hid] == down) return;
+        DOWN[hid] = down;
+        sendKey(minecraft, hid, down);
+    }
+
+    private static void sendKey(Minecraft minecraft, int hid, boolean down) {
         int glfw = hidToGlfw(hid);
         if (glfw == GLFW.GLFW_KEY_UNKNOWN) return;
 
-        boolean was = DOWN[hid];
-        DOWN[hid] = down;
-        var key = InputConstants.Type.KEYSYM.getOrCreate(glfw);
-        KeyMapping.set(key, down);
-        if (down && !was) {
-            KeyMapping.click(key);
-        }
+        long window = minecraft.getWindow().getWindow();
+        int scanCode = GLFW.glfwGetKeyScancode(glfw);
+        int action = down ? GLFW.GLFW_PRESS : GLFW.GLFW_RELEASE;
+        ((KeyboardHandlerInvoker) minecraft.keyboardHandler)
+            .skycraft$keyPress(window, glfw, scanCode, action, modifiers());
     }
 
-    private static void setMouse(int sdlButton, boolean down) {
+    private static void text(Minecraft minecraft, int codePoint) {
+        if (codePoint <= 0) return;
+        ((KeyboardHandlerInvoker) minecraft.keyboardHandler)
+            .skycraft$charTyped(minecraft.getWindow().getWindow(), codePoint, modifiers());
+    }
+
+    private static void mouseButton(Minecraft minecraft, int sdlButton, boolean down) {
         int glfwButton = switch (sdlButton) {
             case 1 -> GLFW.GLFW_MOUSE_BUTTON_LEFT;
             case 2 -> GLFW.GLFW_MOUSE_BUTTON_MIDDLE;
@@ -87,23 +102,44 @@ public final class InputBridge {
             case 5 -> GLFW.GLFW_MOUSE_BUTTON_5;
             default -> -1;
         };
-        if (glfwButton < 0) return;
+        if (glfwButton < 0 || glfwButton >= MOUSE_DOWN.length) return;
+        if (MOUSE_DOWN[glfwButton] == down) return;
+        MOUSE_DOWN[glfwButton] = down;
+        sendMouse(minecraft, glfwButton, down);
+    }
 
-        var key = InputConstants.Type.MOUSE.getOrCreate(glfwButton);
-        KeyMapping.set(key, down);
-        if (down) {
-            KeyMapping.click(key);
-        }
+    private static void sendMouse(Minecraft minecraft, int glfwButton, boolean down) {
+        int action = down ? GLFW.GLFW_PRESS : GLFW.GLFW_RELEASE;
+        ((MouseHandlerInvoker) minecraft.mouseHandler)
+            .skycraft$onPress(minecraft.getWindow().getWindow(), glfwButton, action, modifiers());
     }
 
     private static void scroll(Minecraft minecraft, int wheel120) {
-        if (minecraft.player == null || wheel120 == 0) return;
-        int steps = wheel120 / 120;
-        if (steps == 0) steps = Integer.signum(wheel120);
-        minecraft.player.getInventory().swapPaint(steps);
+        if (wheel120 == 0) return;
+        double steps = wheel120 / 120.0;
+        ((MouseHandlerInvoker) minecraft.mouseHandler)
+            .skycraft$onScroll(minecraft.getWindow().getWindow(), 0.0, steps);
     }
 
-    /** USB HID keyboard usage (same numbers as SDL scancodes) -> GLFW key symbol. */
+    private static void moveCursor(Minecraft minecraft, int x, int y) {
+        ((MouseHandlerInvoker) minecraft.mouseHandler)
+            .skycraft$onMove(minecraft.getWindow().getWindow(), x, y);
+    }
+
+    private static int modifiers() {
+        int mods = 0;
+        if (down(224) || down(228)) mods |= GLFW.GLFW_MOD_CONTROL;
+        if (down(225) || down(229)) mods |= GLFW.GLFW_MOD_SHIFT;
+        if (down(226) || down(230)) mods |= GLFW.GLFW_MOD_ALT;
+        if (down(227) || down(231)) mods |= GLFW.GLFW_MOD_SUPER;
+        return mods;
+    }
+
+    private static boolean down(int hid) {
+        return hid >= 0 && hid < DOWN.length && DOWN[hid];
+    }
+
+    /** USB HID keyboard usage / SDL scancode -> GLFW key symbol. */
     private static int hidToGlfw(int h) {
         if (h >= 4 && h <= 29) return GLFW.GLFW_KEY_A + (h - 4);
         if (h >= 30 && h <= 38) return GLFW.GLFW_KEY_1 + (h - 30);
