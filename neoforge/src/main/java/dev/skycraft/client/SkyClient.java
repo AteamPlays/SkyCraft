@@ -6,6 +6,7 @@ import dev.skycraft.link.SkyLink;
 import dev.skycraft.mixin.MinecraftAccessor;
 import dev.skycraft.mixin.OptionsAccessor;
 import dev.skycraft.world.SkyCollision;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.level.ServerPlayer;
@@ -375,6 +376,7 @@ public final class SkyClient {
             double y = player.yo + (player.getY() - player.yo) * partial;
             double z = player.zo + (player.getZ() - player.zo) * partial;
             Vec3 eye = player.getEyePosition(partial);
+            Camera camera = minecraft.gameRenderer.getMainCamera();
 
             flags |= Proto.MC_IN_WORLD;
             if (player.onGround()) flags |= Proto.MC_ON_GROUND;
@@ -397,7 +399,9 @@ public final class SkyClient {
             MC.guiScale = (int)minecraft.getWindow().getGuiScale();
             MC.fov = minecraft.options.fov().get().floatValue();
             MC.cameraMode = minecraft.options.getCameraType().ordinal();
-            MC.cameraDistance = 0.0F;
+            MC.cameraDistance = camera.isDetached()
+                ? (float) camera.getPosition().distanceTo(eye)
+                : 0.0F;
         }
 
         if (minecraft.screen != null) {
