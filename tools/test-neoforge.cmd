@@ -22,10 +22,14 @@ echo.
 echo [1/2] Starting the fake Skyrim bridge...
 start "SkyCraft fake Skyrim" cmd /k "%PY% tools\fake_skyrim.py 180"
 
-echo [2/2] Starting Minecraft 1.21.1 NeoForge...
+echo [2/2] Starting Minecraft 1.21.1 NeoForge in fake-Skyrim test mode...
+echo This test DOES NOT launch the real Skyrim executable.
 echo The first Gradle run can download Minecraft/NeoForge dependencies.
 echo.
+set "OLD_JAVA_TOOL_OPTIONS=%JAVA_TOOL_OPTIONS%"
+set "JAVA_TOOL_OPTIONS=%JAVA_TOOL_OPTIONS% -Dskycraft.testMode=true"
 cd neoforge
 call ..\fabric\gradlew.bat runClient
+set "JAVA_TOOL_OPTIONS=%OLD_JAVA_TOOL_OPTIONS%"
 
 endlocal
