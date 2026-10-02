@@ -8,7 +8,9 @@
     "GameRendererMixin",
     "KeyboardHandlerInvoker",
     "MouseHandlerInvoker",
-    "InputConstantsMixin"
+    "InputConstantsMixin",
+    "MinecraftMixin",
+    "ScreenMixin"
   ],
   "injectors": {
     "defaultRequire": 1
