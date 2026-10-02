@@ -156,7 +156,7 @@ public final class SkyClient {
         float tickMs = minecraft.level != null
             ? minecraft.level.tickRateManager().millisecondsPerTick()
             : 50.0F;
-        float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+        float partial = ((MinecraftAccessor) (Object) minecraft).skycraft$getTimer().getGameTimeDeltaPartialTick(false);
         MC.tickQpc = SkyLink.qpc() - (long) (partial * tickMs * qpcFreq / 1000.0);
         MC.tickMs = tickMs;
         MC.prevX = player.xo;
@@ -189,7 +189,7 @@ public final class SkyClient {
         int flags = 0;
 
         if (player != null && minecraft.level != null && MirrorWorld.isReady(minecraft)) {
-            float partial = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
+            float partial = ((MinecraftAccessor) (Object) minecraft).skycraft$getTimer().getGameTimeDeltaPartialTick(false);
             double x = player.xo + (player.getX() - player.xo) * partial;
             double y = player.yo + (player.getY() - player.yo) * partial;
             double z = player.zo + (player.getZ() - player.zo) * partial;
