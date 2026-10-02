@@ -1,12 +1,14 @@
 package dev.skycraft.client;
 
 import dev.skycraft.SkyCraft;
+import dev.skycraft.combat.SkyCombat;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.mixin.KeyboardHandlerInvoker;
 import dev.skycraft.mixin.MouseHandlerInvoker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.server.level.ServerPlayer;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -32,6 +34,7 @@ public final class InputBridge {
                 case Proto.IN_CURSOR -> moveCursor(minecraft, a, b);
                 case Proto.IN_TEXT -> text(minecraft, a);
                 case Proto.IN_RELEASE_ALL -> releaseAll(minecraft);
+                case Proto.IN_HURT -> hurt(minecraft, code, a / 100.0F, b, c);
                 case Proto.IN_OPEN_MENU -> {
                     releaseAll(minecraft);
                     if (minecraft.screen == null) {
@@ -47,6 +50,22 @@ public final class InputBridge {
             logged = true;
             SkyCraft.LOG.info("SkyCraft: Skyrim -> Minecraft vanilla input replay active");
         }
+    }
+
+    /** Skyrim combat damage is applied on Minecraft's integrated-server thread. */
+    private static void hurt(Minecraft minecraft, int kind, float skyrimDamage, int attackerFormId, int flags) {
+        var server = minecraft.getSingleplayerServer();
+        if (server == null || minecraft.player == null) {
+            return;
+        }
+
+        var uuid = minecraft.player.getUUID();
+        server.execute(() -> {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player != null) {
+                SkyCombat.hurtPlayer(player, kind, skyrimDamage, attackerFormId, flags);
+            }
+        });
     }
 
     public static void releaseAll() {
