@@ -4,6 +4,7 @@ import dev.skycraft.client.SkyClient;
 import dev.skycraft.client.DestructionToggle;
 import dev.skycraft.combat.SkyCombat;
 import dev.skycraft.compat.CreateCompat;
+import dev.skycraft.compat.AeronauticsCompat;
 import dev.skycraft.link.SkyLink;
 import dev.skycraft.world.SkyCollision;
 import dev.skycraft.world.SkyDig;
@@ -28,6 +29,7 @@ public final class SkyCraft {
         SkyCombat.register(modBus);
         DestructionToggle.register();
         CreateCompat.init();
+        AeronauticsCompat.init();
         LOG.info("SkyCraft: NeoForge 1.21.1 core loaded");
         SkyLink.announceRunning();
         SkyCollision.startConsumer();
@@ -44,5 +46,6 @@ public final class SkyCraft {
     private static void onClientTick(ClientTickEvent.Post event) {
         SkyClient.clientTick();
         CreateCompat.tick(net.minecraft.client.Minecraft.getInstance());
+        AeronauticsCompat.tick(net.minecraft.client.Minecraft.getInstance());
     }
 }
