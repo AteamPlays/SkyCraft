@@ -253,6 +253,7 @@ public final class SkyCollision {
         CHANGED.clear();
         KNOWN_REGIONS.clear();
         epoch = newEpoch;
+        SkyrimCollisionMirror.acceptClear(newEpoch);
         SkyCraft.LOG.info("SkyCraft: virtual collision cleared (epoch {})", newEpoch);
     }
 
@@ -268,6 +269,11 @@ public final class SkyCollision {
 
         adoptEpochIfFresh(messageEpoch);
         if (messageEpoch != epoch || count < 0 || count > 2_000_000) return;
+
+        // Sable cannot consume SkyCraft's exact triangle store directly. Mirror the same streamed
+        // occupancy into invisible BlockStates so Rapier can cache and collide Aeronautics bodies
+        // against Skyrim terrain/buildings.
+        SkyrimCollisionMirror.acceptRegion(s, p);
 
         java.util.HashMap<Long, VoxelShape> fresh = new java.util.HashMap<>(Math.max(16, count * 2));
         java.util.HashMap<Long, Integer> freshFill = new java.util.HashMap<>(Math.max(16, count * 2));
