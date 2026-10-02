@@ -4,7 +4,6 @@ import static dev.skycraft.link.Proto.*;
 
 import com.sun.jna.Pointer;
 import dev.skycraft.SkyCraft;
-import dev.skycraft.link.SkyLink;
 import dev.skycraft.registry.SkyBlocks;
 import java.util.HashMap;
 import java.util.Map;
@@ -20,113 +19,40 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Consumes Skyrim's collision ring and mirrors it as invisible blocks in the
- * dedicated Minecraft world.
+ * Coarse Skyrim collision mirrored as invisible Minecraft blocks for Sable/Create.
  *
- * This is intentionally a coarse first pass for Create/Sable: each 8x8x8 Skyrim
- * voxel cell becomes an invisible slab whose height is the highest occupied
- * eighth. It is stable by BlockState, which matches Sable's collider cache.
+ * Important: this class does NOT consume the shared-memory collision ring itself.
+ * SkyCollision is the single owner of that ring and forwards COL_CLEAR/COL_REGION
+ * messages here. This avoids two threads racing the same tail pointer.
  */
 public final class SkyrimCollisionMirror {
     private static final Map<Long, Integer> DESIRED = new ConcurrentHashMap<>();
+    private static final Map<Long, Integer> APPLIED = new ConcurrentHashMap<>();
     private static final ConcurrentLinkedQueue<Long> DIRTY = new ConcurrentLinkedQueue<>();
     private static final AtomicBoolean FLUSH_SCHEDULED = new AtomicBoolean();
-    private static volatile Thread consumer;
+
     private static volatile int epoch = -1;
     private static volatile long lastCountLog;
-    private static final java.util.concurrent.atomic.AtomicLong APPLIED_UPDATES = new java.util.concurrent.atomic.AtomicLong();
 
     private SkyrimCollisionMirror() {}
-
-    public static synchronized void start() {
-        if (consumer != null) return;
-        consumer = new Thread(SkyrimCollisionMirror::consumeLoop, "SkyCraft collision mirror");
-        consumer.setDaemon(true);
-        consumer.start();
-        SkyCraft.LOG.info("SkyCraft: collision mirror consumer started");
-    }
 
     public static int blockCount() {
         return DESIRED.size();
     }
 
-    public static boolean hasAppliedCollision() {
-        return APPLIED_UPDATES.get() > 0;
-    }
-
-    private static void consumeLoop() {
-        while (!Thread.currentThread().isInterrupted()) {
-            try {
-                if (!drainOnce()) {
-                    Thread.sleep(2L);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } catch (Throwable t) {
-                SkyCraft.LOG.error("SkyCraft: collision mirror consumer failed", t);
-                try {
-                    Thread.sleep(250L);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-    }
-
-    private static boolean drainOnce() {
-        Pointer s = SkyLink.segment();
-        if (s == null) return false;
-
-        long head = SkyLink.collisionHead();
-        long tail = SkyLink.collisionTail();
-        if (tail >= head) return false;
-
-        final long data = OFF_COLLISION_RING + CR_DATA;
-        boolean consumed = false;
-
-        while (tail < head) {
-            long pos = tail % CR_DATA_BYTES;
-            int type = s.getInt(data + pos);
-            int payloadBytes = s.getInt(data + pos + 4);
-
-            if (type == COL_PAD) {
-                tail += CR_DATA_BYTES - pos;
-                consumed = true;
-                continue;
-            }
-
-            long payload = data + pos + 8;
-            switch (type) {
-                case COL_CLEAR -> clear(s.getInt(payload));
-                case COL_REGION -> readRegion(s, payload);
-                case COL_TRIS -> {
-                    // Exact triangles are not required for the first Sable collision pass.
-                }
-                default -> SkyCraft.LOG.warn("SkyCraft: unknown collision message {}", type);
-            }
-
-            tail += align8(8L + Integer.toUnsignedLong(payloadBytes));
-            consumed = true;
-        }
-
-        SkyLink.setCollisionTail(tail);
-        return consumed;
-    }
-
-    private static long align8(long value) {
-        return (value + 7L) & ~7L;
-    }
-
-    private static void clear(int newEpoch) {
+    /** Called only by SkyCollision, the single shared-ring consumer. */
+    static void acceptClear(int newEpoch) {
         for (Long key : DESIRED.keySet()) {
             DIRTY.add(key);
         }
         DESIRED.clear();
+        APPLIED.clear();
         epoch = newEpoch;
-        SkyCraft.LOG.info("SkyCraft: collision mirror cleared (epoch {})", newEpoch);
+        SkyCraft.LOG.info("SkyCraft: collision proxy mirror cleared (epoch {})", newEpoch);
     }
 
-    private static void readRegion(Pointer s, long p) {
+    /** Called only by SkyCollision, the single shared-ring consumer. */
+    static void acceptRegion(Pointer s, long p) {
         int minX = s.getInt(p);
         int minY = s.getInt(p + 4);
         int minZ = s.getInt(p + 8);
@@ -138,9 +64,11 @@ public final class SkyrimCollisionMirror {
 
         if (epoch == -1) {
             epoch = msgEpoch;
-            SkyCraft.LOG.info("SkyCraft: joined collision epoch {}", msgEpoch);
+            SkyCraft.LOG.info("SkyCraft: collision proxy mirror joined epoch {}", msgEpoch);
         }
-        if (msgEpoch != epoch) return;
+        if (msgEpoch != epoch || count < 0 || count > 2_000_000) {
+            return;
+        }
 
         Map<Long, Integer> fresh = new HashMap<>(Math.max(16, count * 2));
         long entry = p + COL_REGION_HEADER_BYTES;
@@ -170,9 +98,12 @@ public final class SkyrimCollisionMirror {
         }
 
         long now = System.currentTimeMillis();
-        if (now - lastCountLog > 5000L) {
+        if (now - lastCountLog > 3000L) {
             lastCountLog = now;
-            SkyCraft.LOG.info("SkyCraft: {} Skyrim collision proxy blocks queued/active", DESIRED.size());
+            SkyCraft.LOG.info(
+                "SkyCraft: {} Skyrim collision proxy blocks received ({} materialized)",
+                DESIRED.size(), APPLIED.size()
+            );
         }
     }
 
@@ -184,6 +115,25 @@ public final class SkyrimCollisionMirror {
             }
         }
         return top + 1;
+    }
+
+    /**
+     * True only after a proxy block near the player's feet has actually been written
+     * into the integrated-server world, not merely received from shared memory.
+     */
+    public static boolean hasAppliedCollisionBelow(double x, double y, double z) {
+        int bx = (int) Math.floor(x);
+        int by = (int) Math.floor(y);
+        int bz = (int) Math.floor(z);
+
+        // The normal case is by-1 (feet at Y=100, floor block at Y=99).
+        // Check a tiny vertical neighborhood to tolerate fractional Skyrim surfaces.
+        for (int yy = by; yy >= by - 2; yy--) {
+            if (APPLIED.containsKey(BlockPos.asLong(bx, yy, bz))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -199,9 +149,10 @@ public final class SkyrimCollisionMirror {
         server.execute(() -> {
             try {
                 ServerLevel level = server.overworld();
-                int applied = 0;
+                int appliedThisPass = 0;
                 Long key;
-                while (applied < 4096 && (key = DIRTY.poll()) != null) {
+
+                while (appliedThisPass < 4096 && (key = DIRTY.poll()) != null) {
                     BlockPos pos = BlockPos.of(key);
                     int height = DESIRED.getOrDefault(key, 0);
                     BlockState current = level.getBlockState(pos);
@@ -211,15 +162,18 @@ public final class SkyrimCollisionMirror {
                         if (isProxy) {
                             level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
                         }
+                        APPLIED.remove(key);
                     } else if (current.isAir() || isProxy) {
                         BlockState wanted = SkyBlocks.SKYRIM_COLLISION.get().defaultBlockState()
                             .setValue(SkyrimCollisionBlock.HEIGHT, height);
-                        if (current != wanted) {
+
+                        if (!current.equals(wanted)) {
                             level.setBlock(pos, wanted, Block.UPDATE_CLIENTS);
                         }
+                        APPLIED.put(key, height);
                     }
-                    applied++;
-                    APPLIED_UPDATES.incrementAndGet();
+
+                    appliedThisPass++;
                 }
             } finally {
                 FLUSH_SCHEDULED.set(false);
