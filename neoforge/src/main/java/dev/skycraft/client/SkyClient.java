@@ -27,6 +27,8 @@ public final class SkyClient {
     private static boolean mirrorReadyLogged;
     private static boolean testCollisionReadyLogged;
     private static boolean realCollisionReadyLogged;
+    private static int appliedViewportW;
+    private static int appliedViewportH;
     private static long frameCounter;
 
     private SkyClient() {}
@@ -65,6 +67,7 @@ public final class SkyClient {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
+        applyViewportSize(minecraft);
 
         if (SKY.menuOpen() || SKY.loading()) {
             InputBridge.releaseAll();
@@ -187,6 +190,19 @@ public final class SkyClient {
         }
 
         SkyLink.writeMcState(MC);
+    }
+
+    private static void applyViewportSize(Minecraft minecraft) {
+        int width = Math.min(SKY.viewportW, Proto.MAX_OVERLAY_W);
+        int height = Math.min(SKY.viewportH, Proto.MAX_OVERLAY_H);
+        if (width <= 0 || height <= 0 || (width == appliedViewportW && height == appliedViewportH)) {
+            return;
+        }
+
+        appliedViewportW = width;
+        appliedViewportH = height;
+        minecraft.getWindow().setWindowed(width, height);
+        SkyCraft.LOG.info("SkyCraft: matching Minecraft overlay viewport to Skyrim {}x{}", width, height);
     }
 
     private static void syncPlayerToSkyrim(Minecraft minecraft, LocalPlayer player, boolean holdGravity) {
