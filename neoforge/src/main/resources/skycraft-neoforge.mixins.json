@@ -5,8 +5,7 @@
   "client": [
     "EntityCollideMixin",
     "LevelRendererMixin",
-    "OptionsAccessor",
-    "WindowMixin"
+    "OptionsAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
