@@ -5,7 +5,9 @@
   "client": [
     "EntityCollideMixin",
     "OptionsAccessor",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "KeyboardHandlerInvoker",
+    "MouseHandlerInvoker"
   ],
   "injectors": {
     "defaultRequire": 1
