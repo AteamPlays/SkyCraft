@@ -20,7 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+
+      - name: Checkout CommonLibSSE-NG only
+        shell: cmd
+        run: git submodule update --init skse/extern/CommonLibSSE-NG
 
       - name: Bootstrap vcpkg
         shell: cmd
