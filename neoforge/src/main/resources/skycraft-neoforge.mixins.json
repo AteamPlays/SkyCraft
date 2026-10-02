@@ -12,7 +12,9 @@
     "MinecraftMixin",
     "ScreenMixin",
     "MinecraftAccessor",
-    "BlockCollisionsMixin"
+    "BlockCollisionsMixin",
+    "CameraZoomMixin",
+    "EntityPickMixin"
   ],
   "injectors": {
     "defaultRequire": 1
