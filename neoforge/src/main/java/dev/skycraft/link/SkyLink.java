@@ -7,8 +7,10 @@ import com.sun.jna.Native;
 import com.sun.jna.NativeLibrary;
 import com.sun.jna.Pointer;
 import com.sun.jna.WString;
+import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.slf4j.Logger;
@@ -22,6 +24,8 @@ import org.slf4j.LoggerFactory;
  */
 public final class SkyLink {
     private static final Logger LOG = LoggerFactory.getLogger("skycraft-link");
+    private static final VarHandle INT_VIEW =
+        MethodHandles.byteBufferViewVarHandle(int[].class, ByteOrder.nativeOrder());
     private static final int FILE_MAP_ALL_ACCESS = 0xF001F;
     private static final long HEARTBEAT_TIMEOUT_MS = 8000L;
 
@@ -517,8 +521,8 @@ public final class SkyLink {
         s.setInt(hdr + SH_FLAGS, bottomUp ? 1 : 0);
         s.setLong(hdr + SH_FRAME_ID, frameId);
         VarHandle.storeStoreFence();
-        int old = s.getInt(OFF_OVERLAY_CTL + OC_STATE);
-        s.setInt(OFF_OVERLAY_CTL + OC_STATE, overlayBack | OVERLAY_DIRTY);
+        ByteBuffer state = s.getByteBuffer(OFF_OVERLAY_CTL + OC_STATE, Integer.BYTES);
+        int old = (int) INT_VIEW.getAndSet(state, 0, overlayBack | OVERLAY_DIRTY);
         overlayBack = old & 3;
         s.setLong(OFF_OVERLAY_CTL + OC_FRAMES_PUBLISHED,
             s.getLong(OFF_OVERLAY_CTL + OC_FRAMES_PUBLISHED) + 1L);
