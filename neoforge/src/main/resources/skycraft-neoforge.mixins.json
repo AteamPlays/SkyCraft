@@ -6,8 +6,7 @@
     "EntityCollideMixin",
     "LevelRendererMixin",
     "OptionsAccessor",
-    "WindowMixin",
-    "FramerateLimitTrackerMixin"
+    "WindowMixin"
   ],
   "injectors": {
     "defaultRequire": 1
