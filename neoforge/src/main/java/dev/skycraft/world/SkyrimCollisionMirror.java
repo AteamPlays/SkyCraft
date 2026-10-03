@@ -4,32 +4,33 @@ import static dev.skycraft.link.Proto.*;
 
 import com.sun.jna.Pointer;
 import dev.skycraft.SkyCraft;
+import dev.skycraft.link.SkyLink;
 import dev.skycraft.registry.SkyBlocks;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.atomic.AtomicBoolean;
-import net.minecraft.client.Minecraft;
+import java.util.function.LongConsumer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
+import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * Coarse Skyrim collision mirrored as invisible Minecraft blocks for Sable/Create.
+ * Virtual Skyrim collision exposed only to Sable's physics lookup.
  *
- * Important: this class does NOT consume the shared-memory collision ring itself.
- * SkyCollision is the single owner of that ring and forwards COL_CLEAR/COL_REGION
- * messages here. This avoids two threads racing the same tail pointer.
+ * Unlike the first Aeronautics bridge, this class NEVER places proxy blocks into the actual
+ * Minecraft level. Materializing Skyrim collision as real blocks made vanilla mobs collide twice,
+ * let assemblers discover Skyrim as part of their structure, and caused block-update cascades.
+ *
+ * SkyCollision remains the single shared-memory consumer and forwards COL_CLEAR/COL_REGION here.
  */
 public final class SkyrimCollisionMirror {
     private static final Map<Long, Integer> DESIRED = new ConcurrentHashMap<>();
-    private static final Map<Long, Integer> APPLIED = new ConcurrentHashMap<>();
-    private static final ConcurrentLinkedQueue<Long> DIRTY = new ConcurrentLinkedQueue<>();
-    private static final AtomicBoolean FLUSH_SCHEDULED = new AtomicBoolean();
+    private static final Map<Long, Integer> SECTION_COUNTS = new ConcurrentHashMap<>();
+
+    private static final ConcurrentLinkedQueue<Long> DIRTY_SECTIONS = new ConcurrentLinkedQueue<>();
+    private static final Set<Long> QUEUED_SECTIONS = ConcurrentHashMap.newKeySet();
 
     private static volatile int epoch = -1;
     private static volatile long lastCountLog;
@@ -40,15 +41,48 @@ public final class SkyrimCollisionMirror {
         return DESIRED.size();
     }
 
+    /** Virtual block state for Sable/Rapier. Real Minecraft blocks always win before this is used. */
+    public static BlockState virtualState(BlockPos pos) {
+        if (!SkyLink.active()) return null;
+        Integer height = DESIRED.get(pos.asLong());
+        if (height == null || height <= 0) return null;
+        return SkyBlocks.SKYRIM_COLLISION.get().defaultBlockState()
+            .setValue(SkyrimCollisionBlock.HEIGHT, height);
+    }
+
+    public static boolean hasSection(int sx, int sy, int sz) {
+        if (!SkyLink.active()) return false;
+        return SECTION_COUNTS.getOrDefault(SectionPos.asLong(sx, sy, sz), 0) > 0;
+    }
+
+    /** Re-upload all current virtual sections to Sable, e.g. after removing legacy real proxies. */
+    public static void markAllSectionsDirty() {
+        for (Long section : SECTION_COUNTS.keySet()) {
+            markSectionDirty(section);
+        }
+    }
+
+    /** Drains section IDs, not individual blocks, so Rapier can refresh whole sections efficiently. */
+    public static int takeDirtySections(int max, LongConsumer consumer) {
+        int count = 0;
+        Long key;
+        while (count < max && (key = DIRTY_SECTIONS.poll()) != null) {
+            QUEUED_SECTIONS.remove(key);
+            consumer.accept(key);
+            count++;
+        }
+        return count;
+    }
+
     /** Called only by SkyCollision, the single shared-ring consumer. */
     static void acceptClear(int newEpoch) {
-        for (Long key : DESIRED.keySet()) {
-            DIRTY.add(key);
+        for (Long section : SECTION_COUNTS.keySet()) {
+            markSectionDirty(section);
         }
         DESIRED.clear();
-        APPLIED.clear();
+        SECTION_COUNTS.clear();
         epoch = newEpoch;
-        SkyCraft.LOG.info("SkyCraft: collision proxy mirror cleared (epoch {})", newEpoch);
+        SkyCraft.LOG.info("SkyCraft: virtual Sable collision cleared (epoch {})", newEpoch);
     }
 
     /** Called only by SkyCollision, the single shared-ring consumer. */
@@ -64,7 +98,7 @@ public final class SkyrimCollisionMirror {
 
         if (epoch == -1) {
             epoch = msgEpoch;
-            SkyCraft.LOG.info("SkyCraft: collision proxy mirror joined epoch {}", msgEpoch);
+            SkyCraft.LOG.info("SkyCraft: virtual Sable collision joined epoch {}", msgEpoch);
         }
         if (msgEpoch != epoch || count < 0 || count > 2_000_000) {
             return;
@@ -86,13 +120,27 @@ public final class SkyrimCollisionMirror {
         for (int x = minX; x <= maxX; x++) {
             for (int y = minY; y <= maxY; y++) {
                 for (int z = minZ; z <= maxZ; z++) {
-                    long key = BlockPos.asLong(x, y, z);
-                    int next = fresh.getOrDefault(key, 0);
-                    Integer before = next == 0 ? DESIRED.remove(key) : DESIRED.put(key, next);
+                    long blockKey = BlockPos.asLong(x, y, z);
+                    int next = fresh.getOrDefault(blockKey, 0);
+                    Integer before = next == 0 ? DESIRED.remove(blockKey) : DESIRED.put(blockKey, next);
                     int old = before == null ? 0 : before;
-                    if (old != next) {
-                        DIRTY.add(key);
+                    if (old == next) continue;
+
+                    long sectionKey = SectionPos.asLong(
+                        SectionPos.blockToSectionCoord(x),
+                        SectionPos.blockToSectionCoord(y),
+                        SectionPos.blockToSectionCoord(z)
+                    );
+
+                    if (old == 0 && next != 0) {
+                        SECTION_COUNTS.merge(sectionKey, 1, Integer::sum);
+                    } else if (old != 0 && next == 0) {
+                        SECTION_COUNTS.compute(sectionKey, (key, value) -> {
+                            if (value == null || value <= 1) return null;
+                            return value - 1;
+                        });
                     }
+                    markSectionDirty(sectionKey);
                 }
             }
         }
@@ -101,9 +149,15 @@ public final class SkyrimCollisionMirror {
         if (now - lastCountLog > 3000L) {
             lastCountLog = now;
             SkyCraft.LOG.info(
-                "SkyCraft: {} Skyrim collision proxy blocks received ({} materialized)",
-                DESIRED.size(), APPLIED.size()
+                "SkyCraft: {} Skyrim collision cells available virtually to Sable ({} sections)",
+                DESIRED.size(), SECTION_COUNTS.size()
             );
+        }
+    }
+
+    private static void markSectionDirty(long key) {
+        if (QUEUED_SECTIONS.add(key)) {
+            DIRTY_SECTIONS.add(key);
         }
     }
 
@@ -115,69 +169,5 @@ public final class SkyrimCollisionMirror {
             }
         }
         return top + 1;
-    }
-
-    /**
-     * True only after a proxy block near the player's feet has actually been written
-     * into the integrated-server world, not merely received from shared memory.
-     */
-    public static boolean hasAppliedCollisionBelow(double x, double y, double z) {
-        int bx = (int) Math.floor(x);
-        int by = (int) Math.floor(y);
-        int bz = (int) Math.floor(z);
-
-        // The normal case is by-1 (feet at Y=100, floor block at Y=99).
-        // Check a tiny vertical neighborhood to tolerate fractional Skyrim surfaces.
-        for (int yy = by; yy >= by - 2; yy--) {
-            if (APPLIED.containsKey(BlockPos.asLong(bx, yy, bz))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Applies queued proxy changes on the integrated server thread. Real Minecraft
-     * blocks always win: SkyCraft only writes into air or replaces its own proxy.
-     */
-    public static void flushToMirrorWorld(Minecraft minecraft) {
-        if (DIRTY.isEmpty()) return;
-
-        MinecraftServer server = minecraft.getSingleplayerServer();
-        if (server == null || !FLUSH_SCHEDULED.compareAndSet(false, true)) return;
-
-        server.execute(() -> {
-            try {
-                ServerLevel level = server.overworld();
-                int appliedThisPass = 0;
-                Long key;
-
-                while (appliedThisPass < 4096 && (key = DIRTY.poll()) != null) {
-                    BlockPos pos = BlockPos.of(key);
-                    int height = DESIRED.getOrDefault(key, 0);
-                    BlockState current = level.getBlockState(pos);
-                    boolean isProxy = current.is(SkyBlocks.SKYRIM_COLLISION.get());
-
-                    if (height == 0) {
-                        if (isProxy) {
-                            level.setBlock(pos, Blocks.AIR.defaultBlockState(), Block.UPDATE_CLIENTS);
-                        }
-                        APPLIED.remove(key);
-                    } else if (current.isAir() || isProxy) {
-                        BlockState wanted = SkyBlocks.SKYRIM_COLLISION.get().defaultBlockState()
-                            .setValue(SkyrimCollisionBlock.HEIGHT, height);
-
-                        if (!current.equals(wanted)) {
-                            level.setBlock(pos, wanted, Block.UPDATE_CLIENTS);
-                        }
-                        APPLIED.put(key, height);
-                    }
-
-                    appliedThisPass++;
-                }
-            } finally {
-                FLUSH_SCHEDULED.set(false);
-            }
-        });
     }
 }
