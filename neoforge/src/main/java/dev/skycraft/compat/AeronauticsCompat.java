@@ -3,20 +3,28 @@ package dev.skycraft.compat;
 import dev.skycraft.SkyCraft;
 import dev.skycraft.client.MirrorWorld;
 import dev.skycraft.client.SkyClient;
+import dev.skycraft.registry.SkyBlocks;
 import dev.skycraft.world.SkyrimCollisionMirror;
+import java.util.concurrent.atomic.AtomicBoolean;
 import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.neoforged.fml.ModList;
 
 /**
  * Create: Aeronautics / Sable compatibility bridge.
  *
- * Rendering needs no replacement renderer: Sable and Flywheel render their sub-levels into
- * Minecraft's world framebuffer, and SkyCraft captures that framebuffer after the level pass.
+ * Rendering needs no replacement renderer: Sable/Flywheel sub-levels are already in Minecraft's
+ * framebuffer before SkyCraft captures it.
  *
- * Physics does need a bridge. Skyrim collision arrives as exact triangles + 1/8-block occupancy;
- * Sable/Rapier expects stable Minecraft BlockStates in the parent level. SkyrimCollisionMirror
- * materializes only that physics representation as invisible blocks so moving Aeronautics
- * sub-levels can collide with Skyrim while the player continues using exact triangle collision.
+ * Physics is virtualized: SkyrimCollisionMirror exposes proxy BlockStates only through Sable's
+ * LevelAccelerator mixin. Nothing is placed into the actual Minecraft world, so mobs, assemblers,
+ * mining, redstone and normal block updates never see Skyrim collision as Minecraft blocks.
  */
 public final class AeronauticsCompat {
     private static final boolean SABLE_LOADED = ModList.get().isLoaded("sable");
@@ -54,14 +62,12 @@ public final class AeronauticsCompat {
             return;
         }
 
-        // Applies a bounded batch on the integrated-server thread. The queue is filled directly
-        // by SkyCollision's single shared-memory consumer, so there is no second ring reader.
-        SkyrimCollisionMirror.flushToMirrorWorld(minecraft);
+        SableBridge.tick(minecraft);
 
         if (!loggedPhysics && SkyrimCollisionMirror.blockCount() > 0) {
             loggedPhysics = true;
             SkyCraft.LOG.info(
-                "SkyCraft: Sable Skyrim-collision bridge active ({} proxy blocks streamed)",
+                "SkyCraft: virtual Sable Skyrim-collision bridge active ({} collision cells)",
                 SkyrimCollisionMirror.blockCount()
             );
         }
@@ -80,5 +86,122 @@ public final class AeronauticsCompat {
             .getModContainerById(modId)
             .map(container -> container.getModInfo().getVersion().toString())
             .orElse("not loaded");
+    }
+
+    /**
+     * Kept in a nested class so SkyCraft's base path does not resolve Sable classes when Sable is
+     * absent. This class is entered only after ModList confirms Sable is loaded.
+     */
+    private static final class SableBridge {
+        private static final AtomicBoolean SERVER_TASK_QUEUED = new AtomicBoolean();
+        private static volatile boolean legacyCleanupDone;
+
+        private static void tick(Minecraft minecraft) {
+            MinecraftServer server = minecraft.getSingleplayerServer();
+            if (server == null || !SERVER_TASK_QUEUED.compareAndSet(false, true)) {
+                return;
+            }
+
+            BlockPos center = minecraft.player != null
+                ? minecraft.player.blockPosition()
+                : BlockPos.ZERO;
+
+            server.execute(() -> {
+                try {
+                    ServerLevel level = server.overworld();
+                    dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem physics =
+                        dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem.get(level);
+                    if (physics == null) return;
+
+                    if (!legacyCleanupDone) {
+                        int removed = purgeLegacyMaterializedProxies(level, physics, center);
+                        legacyCleanupDone = true;
+                        SkyrimCollisionMirror.markAllSectionsDirty();
+                        if (removed > 0) {
+                            SkyCraft.LOG.info(
+                                "SkyCraft: removed {} legacy materialized Skyrim proxy blocks from the test world",
+                                removed
+                            );
+                        }
+                    }
+
+                    SkyrimCollisionMirror.takeDirtySections(24, sectionKey -> {
+                        int sx = SectionPos.x(sectionKey);
+                        int sy = SectionPos.y(sectionKey);
+                        int sz = SectionPos.z(sectionKey);
+
+                        LevelChunk chunk = level.getChunk(sx, sz);
+                        int sectionIndex = chunk.getSectionIndexFromSectionY(sy);
+                        if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) {
+                            return;
+                        }
+
+                        LevelChunkSection section = chunk.getSections()[sectionIndex];
+                        physics.getPipeline().handleChunkSectionAddition(section, sx, sy, sz, false);
+                    });
+                } catch (Throwable t) {
+                    SkyCraft.LOG.error("SkyCraft: Sable Skyrim-collision refresh failed", t);
+                } finally {
+                    SERVER_TASK_QUEUED.set(false);
+                }
+            });
+        }
+
+        /**
+         * The first Aeronautics build wrote collision proxies into the save. Remove only those
+         * SkyCraft-owned blocks around the current Skyrim collision radius, without firing normal
+         * block-neighbor/destruction events. They are invisible implementation details, not world
+         * content.
+         */
+        private static int purgeLegacyMaterializedProxies(
+            ServerLevel level,
+            dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem physics,
+            BlockPos center
+        ) {
+            int removed = 0;
+            int pcx = center.getX() >> 4;
+            int pcz = center.getZ() >> 4;
+            int minSy = SectionPos.blockToSectionCoord(center.getY() - 64);
+            int maxSy = SectionPos.blockToSectionCoord(center.getY() + 64);
+
+            for (int cx = pcx - 3; cx <= pcx + 3; cx++) {
+                for (int cz = pcz - 3; cz <= pcz + 3; cz++) {
+                    LevelChunk chunk = level.getChunk(cx, cz);
+                    boolean chunkChanged = false;
+
+                    for (int sy = minSy; sy <= maxSy; sy++) {
+                        int sectionIndex = chunk.getSectionIndexFromSectionY(sy);
+                        if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) continue;
+
+                        LevelChunkSection section = chunk.getSections()[sectionIndex];
+                        boolean sectionChanged = false;
+
+                        for (int y = 0; y < 16; y++) {
+                            for (int z = 0; z < 16; z++) {
+                                for (int x = 0; x < 16; x++) {
+                                    if (section.getBlockState(x, y, z).is(SkyBlocks.SKYRIM_COLLISION.get())) {
+                                        section.setBlockState(x, y, z, Blocks.AIR.defaultBlockState(), false);
+                                        removed++;
+                                        sectionChanged = true;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (sectionChanged) {
+                            chunkChanged = true;
+                            // Immediately replace the old real-block section in Rapier. The
+                            // LevelAccelerator mixin supplies current virtual Skyrim states.
+                            physics.getPipeline().handleChunkSectionAddition(section, cx, sy, cz, false);
+                        }
+                    }
+
+                    if (chunkChanged) {
+                        chunk.setUnsaved(true);
+                    }
+                }
+            }
+            return removed;
+        }
     }
 }
