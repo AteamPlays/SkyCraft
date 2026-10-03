@@ -3,6 +3,7 @@ package dev.skycraft.client;
 import dev.skycraft.SkyCraft;
 import dev.skycraft.link.Proto;
 import dev.skycraft.link.SkyLink;
+import dev.skycraft.registry.SkyBlocks;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
@@ -208,7 +209,7 @@ public final class AuxWorldExporter {
             for (int z = 0; z < 16; z++) {
                 for (int x = 0; x < 16; x++) {
                     BlockState state = section.getBlockState(x, y, z);
-                    if (state.isAir()) continue;
+                    if (state.isAir() || state.is(SkyBlocks.SKYRIM_COLLISION.get())) continue;
 
                     pos.set(origin.getX() + x, origin.getY() + y, origin.getZ() + z);
 
