@@ -8,7 +8,6 @@ import dev.skycraft.link.SkyLink;
 import dev.skycraft.registry.SkyBlocks;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.LongConsumer;
@@ -19,19 +18,23 @@ import net.minecraft.world.level.block.state.BlockState;
 /**
  * Virtual Skyrim collision exposed only to Sable's physics lookup.
  *
- * Unlike the first Aeronautics bridge, this class NEVER places proxy blocks into the actual
- * Minecraft level. Materializing Skyrim collision as real blocks made vanilla mobs collide twice,
- * let assemblers discover Skyrim as part of their structure, and caused block-update cascades.
+ * The actual Minecraft level is never populated with proxy blocks. Sable sees these states through
+ * SableLevelAcceleratorMixin while vanilla mobs, assembly search, redstone and mining see only the
+ * real Minecraft world.
  *
- * SkyCollision remains the single shared-memory consumer and forwards COL_CLEAR/COL_REGION here.
+ * Performance rule: streamed collision is always kept current in DESIRED, but change events are
+ * queued for Rapier only while at least one Sable sub-level is loaded. A newly assembled craft
+ * gets the current virtual world through Sable's normal section upload, so rebuilding physics
+ * sections continuously while no craft exists is pure wasted work.
  */
 public final class SkyrimCollisionMirror {
     private static final Map<Long, Integer> DESIRED = new ConcurrentHashMap<>();
     private static final Map<Long, Integer> SECTION_COUNTS = new ConcurrentHashMap<>();
 
-    private static final ConcurrentLinkedQueue<Long> DIRTY_SECTIONS = new ConcurrentLinkedQueue<>();
-    private static final Set<Long> QUEUED_SECTIONS = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentLinkedQueue<Long> DIRTY_BLOCKS = new ConcurrentLinkedQueue<>();
+    private static final java.util.Set<Long> QUEUED_BLOCKS = ConcurrentHashMap.newKeySet();
 
+    private static volatile boolean physicsTracking;
     private static volatile int epoch = -1;
     private static volatile long lastCountLog;
 
@@ -39,6 +42,20 @@ public final class SkyrimCollisionMirror {
 
     public static int blockCount() {
         return DESIRED.size();
+    }
+
+    /**
+     * Enable incremental Rapier updates only while a physics craft exists.
+     * Initial craft collision is supplied by Sable's ordinary section upload.
+     */
+    public static void setPhysicsTracking(boolean enabled) {
+        if (physicsTracking == enabled) return;
+        physicsTracking = enabled;
+
+        // Old queued deltas are irrelevant when tracking starts/stops. When a craft starts,
+        // Sable uploads its nearby world sections from the current DESIRED snapshot.
+        DIRTY_BLOCKS.clear();
+        QUEUED_BLOCKS.clear();
     }
 
     /** Virtual block state for Sable/Rapier. Real Minecraft blocks always win before this is used. */
@@ -55,19 +72,15 @@ public final class SkyrimCollisionMirror {
         return SECTION_COUNTS.getOrDefault(SectionPos.asLong(sx, sy, sz), 0) > 0;
     }
 
-    /** Re-upload all current virtual sections to Sable, e.g. after removing legacy real proxies. */
-    public static void markAllSectionsDirty() {
-        for (Long section : SECTION_COUNTS.keySet()) {
-            markSectionDirty(section);
-        }
-    }
-
-    /** Drains section IDs, not individual blocks, so Rapier can refresh whole sections efficiently. */
-    public static int takeDirtySections(int max, LongConsumer consumer) {
+    /**
+     * Drain coalesced changed cells. Rapier's handleBlockChange updates only this voxel and its
+     * six neighbors, avoiding the old 4096-cell section rebuild for every streamed region.
+     */
+    public static int takeDirtyBlocks(int max, LongConsumer consumer) {
         int count = 0;
         Long key;
-        while (count < max && (key = DIRTY_SECTIONS.poll()) != null) {
-            QUEUED_SECTIONS.remove(key);
+        while (count < max && (key = DIRTY_BLOCKS.poll()) != null) {
+            QUEUED_BLOCKS.remove(key);
             consumer.accept(key);
             count++;
         }
@@ -76,8 +89,10 @@ public final class SkyrimCollisionMirror {
 
     /** Called only by SkyCollision, the single shared-ring consumer. */
     static void acceptClear(int newEpoch) {
-        for (Long section : SECTION_COUNTS.keySet()) {
-            markSectionDirty(section);
+        if (physicsTracking) {
+            for (Long key : DESIRED.keySet()) {
+                markBlockDirty(key);
+            }
         }
         DESIRED.clear();
         SECTION_COUNTS.clear();
@@ -140,24 +155,27 @@ public final class SkyrimCollisionMirror {
                             return value - 1;
                         });
                     }
-                    markSectionDirty(sectionKey);
+
+                    if (physicsTracking) {
+                        markBlockDirty(blockKey);
+                    }
                 }
             }
         }
 
         long now = System.currentTimeMillis();
-        if (now - lastCountLog > 3000L) {
+        if (now - lastCountLog > 5000L) {
             lastCountLog = now;
             SkyCraft.LOG.info(
-                "SkyCraft: {} Skyrim collision cells available virtually to Sable ({} sections)",
-                DESIRED.size(), SECTION_COUNTS.size()
+                "SkyCraft: {} Skyrim collision cells cached for Sable ({} sections, incremental={})",
+                DESIRED.size(), SECTION_COUNTS.size(), physicsTracking
             );
         }
     }
 
-    private static void markSectionDirty(long key) {
-        if (QUEUED_SECTIONS.add(key)) {
-            DIRTY_SECTIONS.add(key);
+    private static void markBlockDirty(long key) {
+        if (QUEUED_BLOCKS.add(key)) {
+            DIRTY_BLOCKS.add(key);
         }
     }
 
