@@ -30,7 +30,9 @@
     "ItemMixin",
     "MinecraftServerFlightMixin",
     "BlockStateBaseMixin",
-    "SmithingMixin"
+    "SmithingMixin",
+    "SableLevelAcceleratorMixin",
+    "SableRapierPipelineMixin"
   ],
   "injectors": {
     "defaultRequire": 1
