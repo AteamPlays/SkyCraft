@@ -59,14 +59,15 @@ public final class TriCollider {
 		int steps = Math.max(1, (int) Math.ceil(horizontal / SUBSTEP));
 		double wallFrom = wasOnGround ? step : 0.02;
 		boolean hitWall = false;
+		double[] wallOut = new double[2];
 		for (int i = 0; i < steps; i++) {
 			double px = x, pz = z;
 			x += mx / steps;
 			z += mz / steps;
-			double[] out = pushOutOfWalls(tris, x, y, z, radius, height, wallFrom, step, px, pz);
-			hitWall |= out[0] != x || out[1] != z;
-			x = out[0];
-			z = out[1];
+			pushOutOfWalls(tris, x, y, z, radius, height, wallFrom, step, px, pz, wallOut);
+			hitWall |= wallOut[0] != x || wallOut[1] != z;
+			x = wallOut[0];
+			z = wallOut[1];
 		}
 
 		// 2) Vertical.
@@ -141,10 +142,18 @@ public final class TriCollider {
 	 * Steep triangles count from {@code wallFrom} above the feet; walkable ones only from the
 	 * step height (below that they are ground, handled by {@link #floor}).
 	 */
-	private static double[] pushOutOfWalls(
-		List<SkyTri> tris, double x, double y, double z, double radius, double height, double wallFrom, double step, double prevX, double prevZ
+	private static void pushOutOfWalls(
+		List<SkyTri> tris, double x, double y, double z, double radius, double height, double wallFrom, double step,
+		double prevX, double prevZ, double[] result
 	) {
+		// Reuse these scratch arrays for every candidate triangle in this movement solve. The old
+		// code allocated 3-4 arrays per triangle per wall iteration, producing large GC spikes in
+		// dense Skyrim interiors.
+		double[] clipA = new double[3 * 6];
+		double[] clipB = new double[3 * 6];
 		double[] poly = new double[3 * 6];
+		double[] closest = new double[2];
+
 		for (int iter = 0; iter < 4; iter++) {
 			double bestPen = 0, bestDx = 0, bestDz = 0;
 			for (SkyTri t : tris) {
@@ -156,11 +165,11 @@ public final class TriCollider {
 				if (t.maxY < lo || t.minY > hi || t.maxX < x - radius || t.minX > x + radius || t.maxZ < z - radius || t.minZ > z + radius) {
 					continue;
 				}
-				int n = clipToSlab(t, lo, hi, poly);
+				int n = clipToSlab(t, lo, hi, clipA, clipB, poly);
 				if (n == 0) {
 					continue;
 				}
-				double[] closest = closestXZ(poly, n, x, z);
+				closestXZ(poly, n, x, z, closest);
 				double cx = closest[0], cz = closest[1];
 				double ddx = x - cx, ddz = z - cz;
 				double d = Math.sqrt(ddx * ddx + ddz * ddz);
@@ -171,7 +180,6 @@ public final class TriCollider {
 					dirX = ddx / d;
 					dirZ = ddz / d;
 				} else {
-					// Axis is inside the wall's footprint: push back along its horizontal normal.
 					double hl = Math.hypot(t.nx, t.nz);
 					if (hl < 1e-6) {
 						continue;
@@ -196,13 +204,18 @@ public final class TriCollider {
 			x += bestDx * (bestPen + EPS);
 			z += bestDz * (bestPen + EPS);
 		}
-		return new double[] { x, z };
+
+		result[0] = x;
+		result[1] = z;
 	}
 
 	/** Sutherland-Hodgman clip of the triangle to lo <= y <= hi. Writes xyz triples, returns vertex count. */
-	private static int clipToSlab(SkyTri t, double lo, double hi, double[] out) {
-		double[] a = { t.ax, t.ay, t.az, t.bx, t.by, t.bz, t.cx, t.cy, t.cz };
-		double[] tmp = new double[3 * 6];
+	private static int clipToSlab(
+		SkyTri t, double lo, double hi, double[] a, double[] tmp, double[] out
+	) {
+		a[0] = t.ax; a[1] = t.ay; a[2] = t.az;
+		a[3] = t.bx; a[4] = t.by; a[5] = t.bz;
+		a[6] = t.cx; a[7] = t.cy; a[8] = t.cz;
 		int n = clipPlane(a, 3, tmp, lo, true);
 		if (n == 0) {
 			return 0;
@@ -235,8 +248,7 @@ public final class TriCollider {
 	}
 
 	/** Closest point on the XZ projection of a convex polygon to (x, z). */
-	private static double[] closestXZ(double[] poly, int n, double x, double z) {
-		// Inside test (only meaningful if the projection has area).
+	private static void closestXZ(double[] poly, int n, double x, double z, double[] out) {
 		double area = 0;
 		for (int i = 0; i < n; i++) {
 			int j = (i + 1) % n;
@@ -250,9 +262,12 @@ public final class TriCollider {
 				inside = area > 0 ? cross >= -1e-12 : cross <= 1e-12;
 			}
 			if (inside) {
-				return new double[] { x, z };
+				out[0] = x;
+				out[1] = z;
+				return;
 			}
 		}
+
 		double bestD = Double.MAX_VALUE, bx = poly[0], bz = poly[2];
 		for (int i = 0; i < n; i++) {
 			int j = (i + 1) % n;
@@ -268,7 +283,8 @@ public final class TriCollider {
 				bz = pz;
 			}
 		}
-		return new double[] { bx, bz };
+		out[0] = bx;
+		out[1] = bz;
 	}
 
 	/** Highest surface at or below {@code maxAbove} over the feet at (x, y, z), or NaN. */
