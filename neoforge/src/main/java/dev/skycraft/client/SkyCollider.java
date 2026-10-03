@@ -12,12 +12,16 @@ import net.minecraft.world.phys.Vec3;
 
 /** Feeds the local player's movement through Skyrim's exact collision triangles. */
 public final class SkyCollider {
+    private static final ArrayList<SkyTri> MOVE_TRIS = new ArrayList<>(256);
+    private static final ArrayList<SkyTri> GROUND_TRIS = new ArrayList<>(128);
+
     private SkyCollider() {}
 
     public static Vec3 collide(LocalPlayer player, Vec3 move) {
         AABB box = player.getBoundingBox();
         double step = player.maxUpStep();
-        List<SkyTri> tris = new ArrayList<>();
+        ArrayList<SkyTri> tris = MOVE_TRIS;
+        tris.clear();
         SkyCollision.trianglesNear(
             box.expandTowards(move).inflate(1.0, 1.0 + step, 1.0),
             tris
@@ -49,7 +53,8 @@ public final class SkyCollider {
 
     /** Highest exact Skyrim surface near the feet, matching original SkyCraft spawn recovery. */
     public static double groundAt(double x, double y, double z, double maxAbove) {
-        List<SkyTri> tris = new ArrayList<>();
+        ArrayList<SkyTri> tris = GROUND_TRIS;
+        tris.clear();
         SkyCollision.trianglesNear(
             new AABB(x - 1.0, y - 4.0, z - 1.0, x + 1.0, y + maxAbove + 1.0, z + 1.0),
             tris
