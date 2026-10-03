@@ -14,17 +14,14 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.neoforged.fml.ModList;
 
 /**
  * Create: Aeronautics / Sable compatibility bridge.
  *
- * Rendering needs no replacement renderer: Sable/Flywheel sub-levels are already in Minecraft's
- * framebuffer before SkyCraft captures it.
- *
- * Physics is virtualized: SkyrimCollisionMirror exposes proxy BlockStates only through Sable's
- * LevelAccelerator mixin. Nothing is placed into the actual Minecraft world, so mobs, assemblers,
- * mining, redstone and normal block updates never see Skyrim collision as Minecraft blocks.
+ * Skyrim collision stays virtual to Sable. The hot path is deliberately incremental: changed
+ * collision cells are pushed directly into Rapier instead of re-uploading entire chunk sections.
  */
 public final class AeronauticsCompat {
     private static final boolean SABLE_LOADED = ModList.get().isLoaded("sable");
@@ -67,7 +64,7 @@ public final class AeronauticsCompat {
         if (!loggedPhysics && SkyrimCollisionMirror.blockCount() > 0) {
             loggedPhysics = true;
             SkyCraft.LOG.info(
-                "SkyCraft: virtual Sable Skyrim-collision bridge active ({} collision cells)",
+                "SkyCraft: optimized virtual Sable Skyrim-collision bridge active ({} cached cells)",
                 SkyrimCollisionMirror.blockCount()
             );
         }
@@ -88,13 +85,25 @@ public final class AeronauticsCompat {
             .orElse("not loaded");
     }
 
-    /**
-     * Kept in a nested class so SkyCraft's base path does not resolve Sable classes when Sable is
-     * absent. This class is entered only after ModList confirms Sable is loaded.
-     */
     private static final class SableBridge {
+        /**
+         * Each Rapier cell update refreshes the changed voxel plus its six neighbors. Keeping this
+         * budget modest prevents collision streaming from stealing an integrated-server tick.
+         */
+        private static final int BLOCK_UPDATES_PER_TICK = 192;
+        private static final int CLEANUP_SECTIONS_PER_TICK = 1;
+
         private static final AtomicBoolean SERVER_TASK_QUEUED = new AtomicBoolean();
-        private static volatile boolean legacyCleanupDone;
+
+        private static boolean cleanupInitialized;
+        private static boolean cleanupDone;
+        private static int cleanupCenterChunkX;
+        private static int cleanupCenterChunkZ;
+        private static int cleanupMinSectionY;
+        private static int cleanupMaxSectionY;
+        private static int cleanupChunkIndex;
+        private static int cleanupSectionY;
+        private static int cleanupRemoved;
 
         private static void tick(Minecraft minecraft) {
             MinecraftServer server = minecraft.getSingleplayerServer();
@@ -111,33 +120,52 @@ public final class AeronauticsCompat {
                     ServerLevel level = server.overworld();
                     dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem physics =
                         dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem.get(level);
-                    if (physics == null) return;
-
-                    if (!legacyCleanupDone) {
-                        int removed = purgeLegacyMaterializedProxies(level, physics, center);
-                        legacyCleanupDone = true;
-                        SkyrimCollisionMirror.markAllSectionsDirty();
-                        if (removed > 0) {
-                            SkyCraft.LOG.info(
-                                "SkyCraft: removed {} legacy materialized Skyrim proxy blocks from the test world",
-                                removed
-                            );
-                        }
+                    if (physics == null) {
+                        SkyrimCollisionMirror.setPhysicsTracking(false);
+                        return;
                     }
 
-                    SkyrimCollisionMirror.takeDirtySections(24, sectionKey -> {
-                        int sx = SectionPos.x(sectionKey);
-                        int sy = SectionPos.y(sectionKey);
-                        int sz = SectionPos.z(sectionKey);
+                    var container = dev.ryanhcode.sable.api.sublevel.SubLevelContainer.getContainer(level);
+                    boolean hasCraft = container != null && container.getLoadedCount() > 0;
+                    SkyrimCollisionMirror.setPhysicsTracking(hasCraft);
 
-                        LevelChunk chunk = level.getChunk(sx, sz);
-                        int sectionIndex = chunk.getSectionIndexFromSectionY(sy);
+                    if (!cleanupDone) {
+                        cleanupLegacyProxiesIncrementally(level, physics, center, hasCraft);
+                    }
+
+                    // With no craft, there is nothing for Rapier to collide against. The mirror
+                    // keeps the latest Skyrim snapshot but queues no physics deltas.
+                    if (!hasCraft) {
+                        return;
+                    }
+
+                    SkyrimCollisionMirror.takeDirtyBlocks(BLOCK_UPDATES_PER_TICK, key -> {
+                        BlockPos pos = BlockPos.of(key);
+                        LevelChunk chunk = level.getChunk(pos.getX() >> 4, pos.getZ() >> 4);
+                        int sectionY = SectionPos.blockToSectionCoord(pos.getY());
+                        int sectionIndex = chunk.getSectionIndexFromSectionY(sectionY);
                         if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) {
                             return;
                         }
 
                         LevelChunkSection section = chunk.getSections()[sectionIndex];
-                        physics.getPipeline().handleChunkSectionAddition(section, sx, sy, sz, false);
+                        var state = SkyrimCollisionMirror.virtualState(pos);
+                        if (state == null) {
+                            state = Blocks.AIR.defaultBlockState();
+                        }
+
+                        // Call Rapier directly. SubLevelPhysicsSystem.handleBlockChange performs
+                        // mass/wakeup bookkeeping intended for real Minecraft edits; Skyrim's
+                        // static world stream needs only the collider update.
+                        physics.getPipeline().handleBlockChange(
+                            SectionPos.of(pos),
+                            section,
+                            pos.getX() & 15,
+                            pos.getY() & 15,
+                            pos.getZ() & 15,
+                            Blocks.AIR.defaultBlockState(),
+                            state
+                        );
                     });
                 } catch (Throwable t) {
                     SkyCraft.LOG.error("SkyCraft: Sable Skyrim-collision refresh failed", t);
@@ -148,60 +176,83 @@ public final class AeronauticsCompat {
         }
 
         /**
-         * The first Aeronautics build wrote collision proxies into the save. Remove only those
-         * SkyCraft-owned blocks around the current Skyrim collision radius, without firing normal
-         * block-neighbor/destruction events. They are invisible implementation details, not world
-         * content.
+         * Older test builds materialized Skyrim collision into the save. Scan only one loaded
+         * section per tick, and skip air sections outright, so cleanup is essentially invisible
+         * to frame/tick time.
          */
-        private static int purgeLegacyMaterializedProxies(
+        private static void cleanupLegacyProxiesIncrementally(
             ServerLevel level,
             dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem physics,
-            BlockPos center
+            BlockPos center,
+            boolean hasCraft
         ) {
-            int removed = 0;
-            int pcx = center.getX() >> 4;
-            int pcz = center.getZ() >> 4;
-            int minSy = SectionPos.blockToSectionCoord(center.getY() - 64);
-            int maxSy = SectionPos.blockToSectionCoord(center.getY() + 64);
+            if (!cleanupInitialized) {
+                cleanupInitialized = true;
+                cleanupCenterChunkX = center.getX() >> 4;
+                cleanupCenterChunkZ = center.getZ() >> 4;
+                cleanupMinSectionY = SectionPos.blockToSectionCoord(center.getY() - 64);
+                cleanupMaxSectionY = SectionPos.blockToSectionCoord(center.getY() + 64);
+                cleanupChunkIndex = 0;
+                cleanupSectionY = cleanupMinSectionY;
+            }
 
-            for (int cx = pcx - 3; cx <= pcx + 3; cx++) {
-                for (int cz = pcz - 3; cz <= pcz + 3; cz++) {
-                    LevelChunk chunk = level.getChunk(cx, cz);
-                    boolean chunkChanged = false;
+            for (int budget = 0; budget < CLEANUP_SECTIONS_PER_TICK && !cleanupDone; budget++) {
+                if (cleanupChunkIndex >= 49) {
+                    cleanupDone = true;
+                    if (cleanupRemoved > 0) {
+                        SkyCraft.LOG.info(
+                            "SkyCraft: incrementally removed {} legacy Skyrim proxy blocks",
+                            cleanupRemoved
+                        );
+                    }
+                    return;
+                }
 
-                    for (int sy = minSy; sy <= maxSy; sy++) {
-                        int sectionIndex = chunk.getSectionIndexFromSectionY(sy);
-                        if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) continue;
+                int cx = cleanupCenterChunkX + (cleanupChunkIndex % 7) - 3;
+                int cz = cleanupCenterChunkZ + (cleanupChunkIndex / 7) - 3;
+                int sy = cleanupSectionY;
 
-                        LevelChunkSection section = chunk.getSections()[sectionIndex];
-                        boolean sectionChanged = false;
+                cleanupSectionY++;
+                if (cleanupSectionY > cleanupMaxSectionY) {
+                    cleanupSectionY = cleanupMinSectionY;
+                    cleanupChunkIndex++;
+                }
 
-                        for (int y = 0; y < 16; y++) {
-                            for (int z = 0; z < 16; z++) {
-                                for (int x = 0; x < 16; x++) {
-                                    if (section.getBlockState(x, y, z).is(SkyBlocks.SKYRIM_COLLISION.get())) {
-                                        section.setBlockState(x, y, z, Blocks.AIR.defaultBlockState(), false);
-                                        removed++;
-                                        sectionChanged = true;
-                                    }
-                                }
+                var access = level.getChunkSource().getChunk(cx, cz, ChunkStatus.FULL, false);
+                if (!(access instanceof LevelChunk chunk)) {
+                    continue;
+                }
+
+                int sectionIndex = chunk.getSectionIndexFromSectionY(sy);
+                if (sectionIndex < 0 || sectionIndex >= chunk.getSections().length) {
+                    continue;
+                }
+
+                LevelChunkSection section = chunk.getSections()[sectionIndex];
+                if (section.hasOnlyAir()) {
+                    continue;
+                }
+
+                boolean changed = false;
+                for (int y = 0; y < 16; y++) {
+                    for (int z = 0; z < 16; z++) {
+                        for (int x = 0; x < 16; x++) {
+                            if (section.getBlockState(x, y, z).is(SkyBlocks.SKYRIM_COLLISION.get())) {
+                                section.setBlockState(x, y, z, Blocks.AIR.defaultBlockState(), false);
+                                cleanupRemoved++;
+                                changed = true;
                             }
                         }
-
-                        if (sectionChanged) {
-                            chunkChanged = true;
-                            // Immediately replace the old real-block section in Rapier. The
-                            // LevelAccelerator mixin supplies current virtual Skyrim states.
-                            physics.getPipeline().handleChunkSectionAddition(section, cx, sy, cz, false);
-                        }
                     }
+                }
 
-                    if (chunkChanged) {
-                        chunk.setUnsaved(true);
+                if (changed) {
+                    chunk.setUnsaved(true);
+                    if (hasCraft) {
+                        physics.getPipeline().handleChunkSectionAddition(section, cx, sy, cz, false);
                     }
                 }
             }
-            return removed;
         }
     }
 }
