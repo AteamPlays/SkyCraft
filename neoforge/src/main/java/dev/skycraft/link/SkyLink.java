@@ -340,6 +340,13 @@ public final class SkyLink {
         public boolean hostile() { return (flags & ACTOR_HOSTILE) != 0; }
     }
 
+    public static int actorSeq() {
+        Pointer s = shm;
+        if (s == null) return -1;
+        VarHandle.loadLoadFence();
+        return s.getInt(OFF_ACTOR_TABLE + AT_SEQ);
+    }
+
     public static boolean readActors(List<Actor> out) {
         out.clear();
         Pointer s = shm;
