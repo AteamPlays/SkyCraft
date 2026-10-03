@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
+import java.util.concurrent.locks.LockSupport;
 
 /**
  * Per-frame/tick glue between Minecraft 1.21.1 and Skyrim.
@@ -431,16 +432,25 @@ public final class SkyClient {
 
         int seq = SkyLink.skyStateSeq() >>> 1;
         if (skyrimStalled && seq == lastPacedSeq) {
+            // Skyrim is not producing a new visible frame. Do not let the hidden Minecraft
+            // renderer free-run at hundreds of FPS and steal CPU/GPU time from Skyrim.
+            LockSupport.parkNanos(4_000_000L);
             return;
         }
 
         skyrimStalled = false;
         long deadline = System.nanoTime() + 25_000_000L;
 
-        while ((SkyLink.skyStateSeq() >>> 1) == seq && System.nanoTime() < deadline) {
-            Thread.onSpinWait();
-            if (deadline - System.nanoTime() > 2_000_000L) {
-                Thread.yield();
+        while ((SkyLink.skyStateSeq() >>> 1) == seq) {
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0L) break;
+
+            // Sleep for most of the wait and reserve only the final ~0.1 ms for a spin check.
+            // The old loop burned a CPU core with onSpinWait/yield for up to 25 ms per frame.
+            if (remaining > 300_000L) {
+                LockSupport.parkNanos(Math.min(250_000L, remaining - 100_000L));
+            } else {
+                Thread.onSpinWait();
             }
         }
 
