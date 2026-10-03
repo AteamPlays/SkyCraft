@@ -48,9 +48,7 @@ public final class SkyrimCollisionBlock extends Block {
         // proxy to a Player as well causes sticky walls/doorframes and server rubber-banding.
         // Sable/Rapier, falling blocks, Create contraptions and other non-player collision queries
         // still receive the stable BlockState shape, which is what lets Aeronautics hit Skyrim.
-        if (dev.skycraft.client.SkyClient.linked()
-            && context instanceof EntityCollisionContext entityContext
-            && entityContext.getEntity() instanceof net.minecraft.world.entity.player.Player) {
+        if (context instanceof EntityCollisionContext) {
             return Shapes.empty();
         }
         return SHAPES[state.getValue(HEIGHT)];
