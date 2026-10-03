@@ -16,13 +16,23 @@ import net.minecraft.world.entity.Entity;
 public final class ProxySync {
     private static final List<SkyLink.Actor> ACTORS = new ArrayList<>();
     private static final Map<Integer, SkyLink.Actor> BY_ID = new HashMap<>();
+    private static int lastActorSeq = Integer.MIN_VALUE;
 
     private ProxySync() {}
 
     public static void frame(Minecraft minecraft) {
-        if (minecraft.level == null || !SkyLink.readActors(ACTORS)) {
+        if (minecraft.level == null) {
             return;
         }
+
+        int seq = SkyLink.actorSeq();
+        if (seq < 0 || (seq & 1) != 0 || seq == lastActorSeq) {
+            return;
+        }
+        if (!SkyLink.readActors(ACTORS)) {
+            return;
+        }
+        lastActorSeq = seq;
 
         BY_ID.clear();
         for (SkyLink.Actor actor : ACTORS) {
